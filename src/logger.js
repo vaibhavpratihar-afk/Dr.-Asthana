@@ -98,6 +98,13 @@ export function getRunId() {
 }
 
 /**
+ * Get current run log file path (before finalizeRun resets it)
+ */
+export function getRunLogPath() {
+  return runLogPath;
+}
+
+/**
  * Enable/disable debug mode for verbose logging
  */
 export function setDebugMode(enabled) {
@@ -342,6 +349,7 @@ export function getErrorSummary() {
 export default {
   initRun,
   getRunId,
+  getRunLogPath,
   setDebugMode,
   startStep,
   endStep,

@@ -5,6 +5,7 @@
  * notifications. Replaces the old slack.js module.
  */
 
+import { execSync } from 'child_process';
 import { log, warn, err } from '../logger.js';
 
 /**
@@ -99,6 +100,30 @@ function markdownToAdfBlocks(text) {
 }
 
 /**
+ * Upload a log file to Pixelbin CDN and return the URL.
+ * Returns null on failure — upload errors should never block the pipeline.
+ */
+export function uploadLogFile(logFilePath) {
+  if (!logFilePath) return null;
+
+  try {
+    const output = execSync(
+      `~/.local/bin/pixelbin-upload ${logFilePath} --json --unique --format raw --no-progress`,
+      { encoding: 'utf-8', timeout: 30000, shell: '/bin/bash' }
+    );
+    const parsed = JSON.parse(output);
+    const url = parsed.url || parsed.cdnUrl || null;
+    if (url) {
+      log(`Log file uploaded: ${url}`);
+    }
+    return url;
+  } catch (error) {
+    warn(`Log file upload failed (non-blocking): ${error.message}`);
+    return null;
+  }
+}
+
+/**
  * Build PR description including Claude's summary and test results
  */
 export function buildPRDescription(claudeSummary, testResults) {
@@ -127,7 +152,7 @@ export function buildPRDescription(claudeSummary, testResults) {
  * Build a structured JIRA comment in ADF (Atlassian Document Format).
  * Shows a table of PRs with clickable links, grouped by service.
  */
-export function buildJiraComment(config, allPRs, allFailures, claudeSummary) {
+export function buildJiraComment(config, allPRs, allFailures, claudeSummary, logUrl) {
   const azdoBase = config.AZDO_ORG;
   const project = config.AZDO_PROJECT;
 
@@ -215,6 +240,17 @@ export function buildJiraComment(config, allPRs, allFailures, claudeSummary) {
             }],
           })),
         },
+      ],
+    });
+  }
+
+  // Run log link
+  if (logUrl) {
+    content.push({
+      type: 'paragraph',
+      content: [
+        { type: 'text', text: 'Run Log: ', marks: [{ type: 'strong' }] },
+        { type: 'text', text: 'View full run log', marks: [{ type: 'link', attrs: { href: logUrl } }] },
       ],
     });
   }
@@ -392,7 +428,7 @@ export function buildLeadReviewComment(config, allPRs, claudeSummary, planOutput
 /**
  * Send a Slack DM with all PRs listed (not just the first one).
  */
-export async function notifyAllPRs(config, ticketKey, ticketSummary, allPRs, allFailures, claudeSummary) {
+export async function notifyAllPRs(config, ticketKey, ticketSummary, allPRs, allFailures, claudeSummary, logUrl) {
   if (!config.SLACK_BOT_TOKEN || !config.SLACK_USER_ID) {
     warn('Slack not configured, skipping notification');
     return;
@@ -458,6 +494,13 @@ export async function notifyAllPRs(config, ticketKey, ticketSummary, allPRs, all
       });
     }
 
+    if (logUrl) {
+      blocks.push({
+        type: 'context',
+        elements: [{ type: 'mrkdwn', text: `:page_facing_up: <${logUrl}|View full run log>` }],
+      });
+    }
+
     blocks.push({
       type: 'context',
       elements: [{ type: 'mrkdwn', text: ':eyes: _Please review the draft PRs before merging_' }],
@@ -478,7 +521,7 @@ export async function notifyAllPRs(config, ticketKey, ticketSummary, allPRs, all
 /**
  * Send a Slack DM notification for a failure
  */
-export async function notifyFailure(config, ticketKey, ticketSummary, errorMessage) {
+export async function notifyFailure(config, ticketKey, ticketSummary, errorMessage, logUrl) {
   if (!config.SLACK_BOT_TOKEN || !config.SLACK_USER_ID) {
     return;
   }
@@ -515,6 +558,10 @@ export async function notifyFailure(config, ticketKey, ticketSummary, errorMessa
           text: `*Error:*\n\`\`\`${truncate(errorMessage, 300)}\`\`\``,
         },
       },
+      ...(logUrl ? [{
+        type: 'context',
+        elements: [{ type: 'mrkdwn', text: `:page_facing_up: <${logUrl}|View full run log>` }],
+      }] : []),
       {
         type: 'context',
         elements: [
