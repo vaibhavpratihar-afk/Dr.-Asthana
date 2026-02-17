@@ -10,6 +10,7 @@ Your changes will be submitted as draft PRs for human review.
 4. Handle errors properly. This is a high-throughput production system.
 5. No placeholders or TODOs. Every line must be production-ready.
 6. Run lint/test if available. Note failures but don't block on infra issues.
+7. All changes must be submitted via PR. Always create feature branches from `main`.
 
 ## Tech Stack
 - Node.js + Express backend
@@ -47,7 +48,7 @@ src/
     test-runner.js      — test detection (CLAUDE.md / package.json), execution, shouldRunTests change analysis
     notifications.js    — Slack DMs, JIRA ADF comments (PR table, In-Progress, LEAD REVIEW), PR description builders, run log upload
     jira.js             — JIRA REST API (fetch tickets, get details, comment, add/remove labels, transitions)
-    jira-transitions.js — JIRA status transitions via Claude Code headless subprocess (In-Progress, Dev Testing → EM Review)
+    jira-transitions.js — JIRA status transitions via jira-cli.mjs (API-first + automatic browser fallback)
     azure.js            — Azure DevOps PR creation via az CLI, existing PR detection (TF401179 fallback)
     infra.js            — infrastructure lifecycle (start/stop MongoDB, Redis, Kafka via local scripts)
 agent-rules-with-tests.md  — standing rules injected into clone's CLAUDE.md when Claude runs tests
@@ -109,13 +110,13 @@ Step 9:   Upload run log → PR notification comment + Slack DM + label updates
 - On test failure, full stdout+stderr is saved to `logs/test-<name>-<timestamp>.log` for post-mortem debugging. The run log shows the last 30 lines of stdout (where test frameworks print failure summaries).
 
 ## JIRA Status Transitions
-- **In-Progress** (Step 2.5): Triggered immediately after ticket validation, before any code work begins. Uses the JIRA REST API directly. Posts a rich ADF comment showing the ticket context (summary, description), a table of services/repos/branches being targeted, and scope.
-- **LEAD REVIEW** (Step 8.5): Triggered after all services are processed and PRs exist. Two-step transition via Claude subprocess:
-  1. Dev Testing — browser-based via `node jira-transition.mjs <key> "Dev Testing"` (handles screen/validator requirements)
-  2. EM Review — REST API with transition ID 331 (after 3-second pause for JIRA to process)
+- **In-Progress** (Step 2.5): Triggered immediately after ticket validation, before any code work begins. Posts a rich ADF comment showing the ticket context (summary, description), a table of services/repos/branches being targeted, and scope.
+- **LEAD REVIEW** (Step 8.5): Triggered after all services are processed and PRs exist. Two-step transition:
+  1. Dev Testing — via `node jira-cli.mjs transition <key> "Dev Testing"` (API-first, browser fallback for validators/attachments)
+  2. EM Review — via `node jira-cli.mjs transition <key> "EM Review"` (after 3-second pause for JIRA to process)
   Posts an ADF comment with Claude's implementation plan, files changed, summary, and PR table.
 - **Non-blocking**: All transition calls are wrapped in try/catch. Failures log `warn()` and never block the pipeline. JIRA comments are only posted on successful transitions.
-- **Claude subprocess**: Spawned with `--max-turns 3 --output-format text --dangerously-skip-permissions`, 2-minute timeout per transition. Working directory is configurable via `JIRA_CREATOR_DIR` env var (contains transition workflow scripts and credentials).
+- **jira-cli.mjs**: All transitions use `jira-cli.mjs transition` from `~/Desktop/jira-creator/`. The CLI handles REST API first, with automatic headless browser fallback for hasScreen transitions (Dev Testing validators, QC Report, attachment fields). 2-minute timeout per transition. Working directory is configurable via `JIRA_CREATOR_DIR` env var.
 
 ## Notifications
 - **JIRA:** Structured ADF comment with a table of PRs (service, branch, PR link), Claude's summary, and any failures in a warning panel. Trigger label is removed, versioned done labels are added.

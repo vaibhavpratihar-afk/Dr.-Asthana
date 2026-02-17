@@ -31,7 +31,7 @@ src/
     test-runner.js      — test detection (CLAUDE.md / package.json), execution, shouldRunTests change analysis
     notifications.js    — Slack DMs, JIRA ADF comments (PR table, In-Progress, LEAD REVIEW), PR description builders
     jira.js             — JIRA REST API (fetch tickets, get details, comment, add/remove labels, transitions)
-    jira-transitions.js — JIRA status transitions via Claude Code headless subprocess (In-Progress, Dev Testing → EM Review)
+    jira-transitions.js — JIRA status transitions via jira-cli.mjs (API-first + automatic browser fallback)
     azure.js            — Azure DevOps PR creation via az CLI, existing PR detection (TF401179 fallback)
     infra.js            — infrastructure lifecycle (start/stop MongoDB, Redis, Kafka via local scripts)
 agent-rules-with-tests.md  — standing rules injected into clone's CLAUDE.md when Claude runs tests
@@ -60,7 +60,7 @@ logs/                      — run logs, error logs, Claude pass outputs, and te
    i. Handles base image tagging if dependencies changed (auto-detected from Dockerfile).
    j. Opens a PR on Azure DevOps (detects and reuses existing PRs).
    k. Cleans up the clone directory.
-7. **Transitions ticket to LEAD REVIEW** (only if PRs were created) — two-step transition via Claude subprocess: Dev Testing (browser-based) then EM Review (API). Posts an ADF comment with Claude's plan, files changed, summary, and PR table.
+7. **Transitions ticket to LEAD REVIEW** (only if PRs were created) — two-step transition via `jira-cli.mjs`: Dev Testing then EM Review (API-first with automatic browser fallback). Posts an ADF comment with Claude's plan, files changed, summary, and PR table.
 8. Posts a structured ADF comment on JIRA with a PR table and summary.
 9. Sends a Slack DM with all PR links.
 10. Removes the trigger label, adds versioned done labels.

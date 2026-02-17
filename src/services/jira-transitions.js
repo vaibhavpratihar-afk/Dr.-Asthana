@@ -1,46 +1,40 @@
 /**
  * JIRA Status Transitions
  *
- * Uses direct REST API calls with status verification.
- * Falls back to Claude Code headless subprocess only for Dev Testing
- * (which requires browser-based form submission).
+ * Uses jira-cli.mjs for all transitions. The CLI handles:
+ *   - REST API first (fast path)
+ *   - Automatic browser fallback for hasScreen transitions (Dev Testing, etc.)
+ *   - QC Report validators, attachment fields, etc.
  *
  * Two transitions:
- *   1. In-Progress  — direct REST API + verify
- *   2. LEAD REVIEW  — two-step: Dev Testing (browser) → EM Review (API + verify)
+ *   1. In-Progress  — jira-cli.mjs transition
+ *   2. LEAD REVIEW  — two-step: Dev Testing → EM Review (both via jira-cli.mjs)
  */
 
 import { spawn } from 'child_process';
 import path from 'path';
 import os from 'os';
 import { log, warn, debug } from '../logger.js';
-import { transitionTicket, getTicketStatus } from './jira.js';
 
-const JIRA_CREATOR_DIR = process.env.JIRA_CREATOR_DIR || path.join(os.homedir(), 'jira-creator');
+const JIRA_CREATOR_DIR = process.env.JIRA_CREATOR_DIR || path.join(os.homedir(), 'Desktop', 'jira-creator');
 const TRANSITION_TIMEOUT = 2 * 60 * 1000; // 2 minutes per transition
 
 /**
- * Core spawner — runs Claude Code headless against jira-creator directory.
- * Still needed for Dev Testing (browser-based transition).
+ * Run a JIRA transition via jira-cli.mjs.
+ * Handles API-first with automatic browser fallback.
  * Never throws; returns { success, output, exitCode }.
  */
-async function spawnClaudeForTransition(prompt, label) {
-  log(`[transition:${label}] Spawning Claude for JIRA transition...`);
-  debug(`[transition:${label}] Prompt: ${prompt.substring(0, 200)}...`);
+async function runJiraCliTransition(ticketKey, transitionName, label) {
+  log(`[transition:${label}] Running jira-cli.mjs transition "${transitionName}"...`);
 
-  const args = [
-    '-p', prompt,
-    '--max-turns', '3',
-    '--output-format', 'text',
-    '--verbose',
-    '--dangerously-skip-permissions',
-  ];
+  const args = ['jira-cli.mjs', 'transition', ticketKey, transitionName];
 
   try {
     const result = await new Promise((resolve, reject) => {
-      let rawOutput = '';
+      let stdout = '';
+      let stderr = '';
 
-      const proc = spawn('claude', args, {
+      const proc = spawn('node', args, {
         cwd: JIRA_CREATOR_DIR,
         env: { ...process.env },
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -49,11 +43,11 @@ async function spawnClaudeForTransition(prompt, label) {
       proc.stdin.end();
 
       proc.stdout.on('data', (data) => {
-        rawOutput += data.toString();
+        stdout += data.toString();
       });
 
       proc.stderr.on('data', (data) => {
-        debug(`[transition:${label}:stderr] ${data.toString().trim().substring(0, 200)}`);
+        stderr += data.toString();
       });
 
       const timeoutId = setTimeout(() => {
@@ -63,19 +57,22 @@ async function spawnClaudeForTransition(prompt, label) {
 
       proc.on('close', (code) => {
         clearTimeout(timeoutId);
-        log(`[transition:${label}] Claude finished: exit=${code}`);
-        resolve({ output: rawOutput, exitCode: code });
+        log(`[transition:${label}] jira-cli.mjs finished: exit=${code}`);
+        if (stderr.trim()) {
+          debug(`[transition:${label}:stderr] ${stderr.trim().substring(0, 500)}`);
+        }
+        resolve({ output: stdout, exitCode: code });
       });
 
       proc.on('error', (error) => {
         clearTimeout(timeoutId);
-        reject(new Error(`Failed to spawn Claude for transition (${label}): ${error.message}`));
+        reject(new Error(`Failed to spawn jira-cli.mjs for transition (${label}): ${error.message}`));
       });
     });
 
     const success = result.exitCode === 0;
     if (!success) {
-      warn(`[transition:${label}] Claude exited with code ${result.exitCode}`);
+      warn(`[transition:${label}] jira-cli.mjs exited with code ${result.exitCode}`);
       debug(`[transition:${label}] Output: ${result.output.substring(0, 500)}`);
     }
 
@@ -88,108 +85,55 @@ async function spawnClaudeForTransition(prompt, label) {
 }
 
 /**
- * Transition ticket to In-Progress via direct REST API.
- * Verifies actual status after transition.
+ * Transition ticket to In-Progress via jira-cli.mjs.
  *
- * @param {object} config - Configuration object with JIRA credentials
+ * @param {object} config - Configuration object (unused, kept for interface compat)
  * @param {string} ticketKey - e.g. "JCP-1234"
- * @returns {Promise<boolean>} true if transitioned (or already in status)
+ * @returns {Promise<boolean>} true if transitioned successfully
  */
 export async function transitionToInProgress(config, ticketKey) {
   log(`Transitioning ${ticketKey} to In-Progress...`);
 
-  // Check current status first
-  const currentStatus = await getTicketStatus(config, ticketKey);
-  if (currentStatus) {
-    log(`${ticketKey} current status: "${currentStatus}"`);
-    if (currentStatus.toLowerCase().includes('in-progress') || currentStatus.toLowerCase().includes('in progress')) {
-      log(`${ticketKey} is already In-Progress`);
-      return true;
-    }
+  const result = await runJiraCliTransition(ticketKey, 'In-Progress', `in-progress-${ticketKey}`);
+
+  if (result.success) {
+    log(`${ticketKey} transitioned to In-Progress`);
+    return true;
   }
 
-  // Attempt direct API transition
-  const transitioned = await transitionTicket(config, ticketKey, 'In-Progress');
-
-  if (!transitioned) {
-    // May already be in a status where In-Progress isn't available
-    warn(`Could not transition ${ticketKey} to In-Progress via API`);
-    return false;
-  }
-
-  // Verify the transition actually took effect
-  const newStatus = await getTicketStatus(config, ticketKey);
-  if (newStatus) {
-    const isInProgress = newStatus.toLowerCase().includes('in-progress') || newStatus.toLowerCase().includes('in progress');
-    if (isInProgress) {
-      log(`${ticketKey} verified In-Progress (status: "${newStatus}")`);
-      return true;
-    }
-    warn(`${ticketKey} transition reported success but status is "${newStatus}" (expected In-Progress)`);
-    return false;
-  }
-
-  // Could not verify but API said success — trust it
-  log(`${ticketKey} transition API succeeded (could not verify status)`);
-  return true;
+  warn(`Could not transition ${ticketKey} to In-Progress`);
+  return false;
 }
 
 /**
  * Transition ticket to LEAD REVIEW via two steps:
- *   Step 1: Dev Testing (browser-based via jira-transition.mjs — still uses Claude subprocess)
- *   Step 2: EM Review (direct API + verify)
+ *   Step 1: Dev Testing (jira-cli.mjs handles browser fallback automatically)
+ *   Step 2: EM Review (jira-cli.mjs handles API call)
  *
- * @param {object} config - Configuration object with JIRA credentials
+ * @param {object} config - Configuration object (unused, kept for interface compat)
  * @param {string} ticketKey - e.g. "JCP-1234"
  * @returns {Promise<{devTestingDone: boolean, emReviewDone: boolean}>}
  */
 export async function transitionToLeadReview(config, ticketKey) {
   log(`Transitioning ${ticketKey} to LEAD REVIEW (Dev Testing → EM Review)...`);
 
-  // Step 1: Dev Testing (browser-based — requires Claude subprocess)
-  const devTestingPrompt = `Run the following command to transition JIRA ticket ${ticketKey} to "Dev Testing":
-
-node jira-transition.mjs ${ticketKey} "Dev Testing"
-
-This uses a headless browser to perform the transition. Wait for the command to complete and report whether it succeeded.`;
-
-  const devResult = await spawnClaudeForTransition(devTestingPrompt, `dev-testing-${ticketKey}`);
+  // Step 1: Dev Testing
+  const devResult = await runJiraCliTransition(ticketKey, 'Dev Testing', `dev-testing-${ticketKey}`);
 
   if (!devResult.success) {
     warn(`Dev Testing transition failed for ${ticketKey} — skipping EM Review`);
-    warn(`Dev Testing output: ${devResult.output.substring(0, 300)}`);
     return { devTestingDone: false, emReviewDone: false };
   }
 
-  // Verify Dev Testing actually changed the status
-  const postDevStatus = await getTicketStatus(config, ticketKey);
-  if (postDevStatus) {
-    log(`${ticketKey} status after Dev Testing: "${postDevStatus}"`);
-    if (!postDevStatus.toLowerCase().includes('dev testing') && !postDevStatus.toLowerCase().includes('testing')) {
-      warn(`Dev Testing reported success but status is "${postDevStatus}" — attempting EM Review anyway`);
-    }
-  }
-
-  log(`${ticketKey} Dev Testing transition done, waiting 3s for JIRA to process...`);
+  log(`${ticketKey} Dev Testing done, waiting 3s for JIRA to process...`);
   await new Promise(resolve => setTimeout(resolve, 3000));
 
-  // Step 2: EM Review (direct API)
-  const emTransitioned = await transitionTicket(config, ticketKey, 'EM Review');
+  // Step 2: EM Review
+  const emResult = await runJiraCliTransition(ticketKey, 'EM Review', `em-review-${ticketKey}`);
 
-  if (!emTransitioned) {
-    warn(`EM Review transition failed for ${ticketKey} via API`);
+  if (!emResult.success) {
+    warn(`EM Review transition failed for ${ticketKey}`);
     return { devTestingDone: true, emReviewDone: false };
-  }
-
-  // Verify EM Review status
-  const postEmStatus = await getTicketStatus(config, ticketKey);
-  if (postEmStatus) {
-    const isEmReview = postEmStatus.toLowerCase().includes('em review') || postEmStatus.toLowerCase().includes('lead review');
-    if (isEmReview) {
-      log(`${ticketKey} verified EM Review (status: "${postEmStatus}")`);
-    } else {
-      warn(`${ticketKey} EM Review transition reported success but status is "${postEmStatus}"`);
-    }
   }
 
   log(`${ticketKey} transitioned to EM Review (LEAD REVIEW)`);
