@@ -10,6 +10,7 @@ Your changes will be submitted as draft PRs for human review.
 4. Handle errors properly. This is a high-throughput production system.
 5. No placeholders or TODOs. Every line must be production-ready.
 6. Run lint/test if available. Note failures but don't block on infra issues.
+7. All changes must be submitted via PR. Always create feature branches from `main`.
 
 ## Tech Stack
 - Node.js + Express backend
