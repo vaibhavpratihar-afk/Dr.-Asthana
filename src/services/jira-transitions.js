@@ -145,6 +145,63 @@ export async function transitionToLeadReview(config, ticketKey) {
 }
 
 /**
+ * Search JIRA tickets via jira-cli.mjs search command.
+ * Unlike other CLI wrappers, this THROWS on failure — callers (daemon, dry-run)
+ * depend on error propagation for control flow.
+ *
+ * @param {string} jql - JQL query string
+ * @param {number} maxResults - Maximum number of results
+ * @param {string[]} fields - Fields to return
+ * @returns {Promise<object[]>} Array of issue objects
+ */
+export async function searchTickets(jql, maxResults, fields) {
+  const result = await runJiraCli(
+    ['search', '--jql', jql, '--max-results', String(maxResults), '--fields', fields.join(','), '--json'],
+    'search',
+    30000
+  );
+
+  if (!result.success) {
+    throw new Error(`JIRA search failed (exit ${result.exitCode}): ${result.output.substring(0, 500)}`);
+  }
+
+  const data = JSON.parse(result.output);
+  return data.issues || [];
+}
+
+/**
+ * Add a label to a JIRA ticket via jira-cli.mjs.
+ * Non-blocking: never throws, return value is always discarded by callers.
+ *
+ * @param {string} ticketKey - e.g. "JCP-1234"
+ * @param {string} label - Label to add
+ * @returns {Promise<boolean>} true if added successfully
+ */
+export async function addLabel(ticketKey, label) {
+  const result = await runJiraCli(
+    ['label', 'add', ticketKey, label],
+    `label-add-${ticketKey}`
+  );
+  return result.success;
+}
+
+/**
+ * Remove a label from a JIRA ticket via jira-cli.mjs.
+ * Non-blocking: never throws, return value is always discarded by callers.
+ *
+ * @param {string} ticketKey - e.g. "JCP-1234"
+ * @param {string} label - Label to remove
+ * @returns {Promise<boolean>} true if removed successfully
+ */
+export async function removeLabel(ticketKey, label) {
+  const result = await runJiraCli(
+    ['label', 'remove', ticketKey, label],
+    `label-remove-${ticketKey}`
+  );
+  return result.success;
+}
+
+/**
  * Post a Markdown comment to a JIRA ticket via jira-cli.mjs.
  * Writes markdown to a temp file, passes it with --file flag.
  * Non-blocking: catches all errors, logs warnings, never throws.

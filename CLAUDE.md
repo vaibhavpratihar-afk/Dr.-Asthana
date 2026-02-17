@@ -46,9 +46,9 @@ src/
     git.js              — clone, branch, commit, push, cleanup; restores CLAUDE.md before committing
     base-tagger.js      — base image tag creation (auto-detected from Dockerfile)
     test-runner.js      — test detection (CLAUDE.md / package.json), execution, shouldRunTests change analysis
-    notifications.js    — Slack DMs, JIRA ADF comments (PR table, In-Progress, LEAD REVIEW), PR description builders, run log upload
-    jira.js             — JIRA REST API (fetch tickets, get details, comment, add/remove labels, transitions)
-    jira-transitions.js — JIRA status transitions via jira-cli.mjs (API-first + automatic browser fallback)
+    notifications.js    — Slack DMs, JIRA comment builders (PR table, In-Progress, LEAD REVIEW), PR description builders, run log upload
+    jira.js             — JIRA REST API (get ticket details, get status, legacy transitions)
+    jira-transitions.js — JIRA CLI operations via jira-cli.mjs (transitions, comments, search, labels)
     azure.js            — Azure DevOps PR creation via az CLI, existing PR detection (TF401179 fallback)
     infra.js            — infrastructure lifecycle (start/stop MongoDB, Redis, Kafka via local scripts)
 agent-rules-with-tests.md  — standing rules injected into clone's CLAUDE.md when Claude runs tests
@@ -109,14 +109,20 @@ Step 9:   Upload run log → PR notification comment + Slack DM + label updates
 - When CLAUDE.md provides both a shell script and bare `npm test`, only the shell script runs (it wraps `npm test` internally).
 - On test failure, full stdout+stderr is saved to `logs/test-<name>-<timestamp>.log` for post-mortem debugging. The run log shows the last 30 lines of stdout (where test frameworks print failure summaries).
 
-## JIRA Status Transitions
+## JIRA CLI Operations (`jira-transitions.js`)
+All JIRA write and query operations are routed through `jira-cli.mjs` via `jira-transitions.js`. The only direct REST API calls remaining in `jira.js` are read-only (`getTicketDetails`, `getTicketStatus`) and the legacy `transitionTicket`.
+
+- **Transitions** (In-Progress, Dev Testing, EM Review): via `jira-cli.mjs transition`. API-first with automatic browser fallback for hasScreen transitions. 2-minute timeout.
+- **Comments**: via `jira-cli.mjs comment add --file`. Markdown written to temp file, posted, temp file cleaned up. Non-blocking.
+- **Search** (`searchTickets`): via `jira-cli.mjs search --jql --json`. Used by daemon and dry-run modes. **Throws on failure** (callers depend on error propagation). 30s timeout.
+- **Labels** (`addLabel`, `removeLabel`): via `jira-cli.mjs label add/remove`. Non-blocking (never throw). Used for trigger label removal and versioned done-label management.
 - **In-Progress** (Step 2.5): Triggered immediately after ticket validation, before any code work begins. Posts a rich ADF comment showing the ticket context (summary, description), a table of services/repos/branches being targeted, and scope.
 - **LEAD REVIEW** (Step 8.5): Triggered after all services are processed and PRs exist. Two-step transition:
   1. Dev Testing — via `node jira-cli.mjs transition <key> "Dev Testing"` (API-first, browser fallback for validators/attachments)
   2. EM Review — via `node jira-cli.mjs transition <key> "EM Review"` (after 3-second pause for JIRA to process)
   Posts an ADF comment with Claude's implementation plan, files changed, summary, and PR table.
-- **Non-blocking**: All transition calls are wrapped in try/catch. Failures log `warn()` and never block the pipeline. JIRA comments are only posted on successful transitions.
-- **jira-cli.mjs**: All transitions use `jira-cli.mjs transition` from `~/Desktop/jira-creator/`. The CLI handles REST API first, with automatic headless browser fallback for hasScreen transitions (Dev Testing validators, QC Report, attachment fields). 2-minute timeout per transition. Working directory is configurable via `JIRA_CREATOR_DIR` env var.
+- **Non-blocking**: All transition and label calls are wrapped in try/catch. Failures log `warn()` and never block the pipeline.
+- **jira-cli.mjs**: Working directory defaults to `~/Desktop/jira-creator/`, configurable via `JIRA_CREATOR_DIR` env var.
 
 ## Notifications
 - **JIRA:** Structured ADF comment with a table of PRs (service, branch, PR link), Claude's summary, and any failures in a warning panel. Trigger label is removed, versioned done labels are added.

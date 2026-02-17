@@ -10,7 +10,8 @@
  */
 
 import { loadConfig } from './config.js';
-import { fetchTickets, getTicketDetails } from './services/jira.js';
+import { getTicketDetails } from './services/jira.js';
+import { searchTickets } from './services/jira-transitions.js';
 import { processTicket } from './agent/processor.js';
 import { parseTicket, displayTicketDetails } from './agent/ticket.js';
 import { log, ok, warn, err } from './logger.js';
@@ -45,7 +46,9 @@ async function runDryRun(config) {
   log('');
 
   try {
-    const tickets = await fetchTickets(config);
+    const jql = `labels = "${config.JIRA_LABEL}" ORDER BY priority DESC`;
+    const fields = ['summary', 'description', 'comment', 'issuetype', 'priority', 'status', 'labels', config.JIRA_FIELDS.affectedSystems, config.JIRA_FIELDS.fixVersions];
+    const tickets = await searchTickets(jql, config.MAX_TICKETS_PER_CYCLE, fields);
 
     if (tickets.length === 0) {
       log('No tickets found matching criteria');
@@ -86,7 +89,9 @@ async function runDaemon(config) {
     cycleCount++;
     try {
       log(`Checking for new patients (cycle ${cycleCount})...`);
-      const tickets = await fetchTickets(config);
+      const jql = `labels = "${config.JIRA_LABEL}" ORDER BY priority DESC`;
+      const fields = ['summary', 'description', 'comment', 'issuetype', 'priority', 'status', 'labels', config.JIRA_FIELDS.affectedSystems, config.JIRA_FIELDS.fixVersions];
+      const tickets = await searchTickets(jql, config.MAX_TICKETS_PER_CYCLE, fields);
 
       if (tickets.length === 0) {
         log('No patients waiting. Shutting down.');
