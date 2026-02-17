@@ -1,0 +1,30 @@
+{
+  "name": "auto-dev-agent",
+  "version": "1.0.0",
+  "description": "Autonomous dev agent that polls JIRA, implements tickets using Claude, and creates Azure DevOps PRs",
+  "type": "module",
+  "main": "src/index.js",
+  "bin": {
+    "auto-dev-agent": "src/index.js"
+  },
+  "scripts": {
+    "start": "node src/index.js daemon",
+    "single": "node src/index.js single",
+    "dry-run": "node src/index.js dry-run"
+  },
+  "dependencies": {
+    "@slack/web-api": "^7.13.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "jira",
+    "automation",
+    "claude",
+    "azure-devops",
+    "ai-agent"
+  ],
+  "author": "",
+  "license": "MIT"
+}

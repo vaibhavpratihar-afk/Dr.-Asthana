@@ -1,0 +1,17 @@
+node_modules/
+.tmp/
+logs/
+*.log
+.env
+
+# Secrets / credentials
+config.json
+
+# Redis dump
+dump.rdb
+
+# OS files
+.DS_Store
+
+# Claude local state
+.claude/
