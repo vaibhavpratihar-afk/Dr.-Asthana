@@ -202,49 +202,6 @@ export async function transitionTicket(config, ticketKey, targetStatusName) {
 }
 
 /**
- * Add a comment to a ticket (ADF format).
- * Accepts either a plain string or a pre-built ADF document object.
- */
-export async function addComment(config, ticketKey, textOrAdf) {
-  const url = `${config.JIRA_BASE_URL}/rest/api/3/issue/${ticketKey}/comment`;
-
-  // If caller provides a pre-built ADF doc, use it directly; otherwise wrap plain text
-  const adfBody = (textOrAdf && typeof textOrAdf === 'object' && textOrAdf.type === 'doc')
-    ? textOrAdf
-    : {
-      type: 'doc',
-      version: 1,
-      content: [
-        {
-          type: 'paragraph',
-          content: [{ type: 'text', text: textOrAdf }],
-        },
-      ],
-    };
-
-  const body = { body: adfBody };
-
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      Authorization: getAuthHeader(config),
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    },
-    body: JSON.stringify(body),
-  });
-
-  if (!response.ok) {
-    const responseText = await response.text();
-    warn(`Failed to add comment to ${ticketKey}: ${responseText}`);
-    return false;
-  }
-
-  log(`Added comment to ${ticketKey}`);
-  return true;
-}
-
-/**
  * Add a label to a ticket
  */
 export async function addLabel(config, ticketKey, label) {
@@ -305,7 +262,6 @@ export default {
   getTicketDetails,
   getTicketStatus,
   transitionTicket,
-  addComment,
   addLabel,
   removeLabel,
 };

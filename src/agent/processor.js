@@ -17,13 +17,13 @@ import { fileURLToPath } from 'url';
 import { parseTicket, displayTicketDetails } from './ticket.js';
 import { scoreComplexity } from './complexity.js';
 import { detectAndFilterRetrigger } from './retrigger.js';
-import { getTicketDetails, addComment, addLabel, removeLabel } from '../services/jira.js';
+import { getTicketDetails, addLabel, removeLabel } from '../services/jira.js';
 import { cloneAndBranch, commitAndPush, cleanup } from '../services/git.js';
 import { handleBaseTag } from '../services/base-tagger.js';
 import { runAgentProvider, getProviderLabel } from '../services/ai-provider.js';
 import { createPR } from '../services/azure.js';
 import { buildJiraComment, buildPRDescription, buildInProgressComment, buildLeadReviewComment, notifyAllPRs, notifyFailure, uploadLogFile } from '../services/notifications.js';
-import { transitionToInProgress, transitionToLeadReview } from '../services/jira-transitions.js';
+import { transitionToInProgress, transitionToLeadReview, postComment } from '../services/jira-transitions.js';
 import { startServices, stopServices } from '../services/infra.js';
 import { runTests, formatTestResults, shouldRunTests } from '../services/test-runner.js';
 import { getServiceConfig } from '../config.js';
@@ -232,7 +232,7 @@ export async function processTicket(config, ticketOrKey) {
       for (const error of validationErrors) {
         warn(`Validation failed: ${error}`);
       }
-      await addComment(config, ticketKey, `Dr. Asthana: Cannot process ticket.\n\nValidation errors:\n${validationErrors.map(e => '- ' + e).join('\n')}`);
+      await postComment(ticketKey, `Dr. Asthana: Cannot process ticket.\n\nValidation errors:\n${validationErrors.map(e => '- ' + e).join('\n')}`);
       endStep(false, `Validation failed: ${validationErrors.join(', ')}`);
       finalizeRun(false, 'Validation failed');
       return { success: false, reason: 'validation_failed', errors: validationErrors };
@@ -244,7 +244,7 @@ export async function processTicket(config, ticketOrKey) {
       const transitioned = await transitionToInProgress(config, ticketKey);
       if (transitioned) {
         const inProgressComment = buildInProgressComment(config, ticket);
-        await addComment(config, ticketKey, inProgressComment);
+        await postComment(ticketKey, inProgressComment);
         log(`In-Progress transition and comment posted for ${ticketKey}`);
       }
     } catch (transitionError) {
@@ -354,7 +354,7 @@ export async function processTicket(config, ticketOrKey) {
         const transitionResult = await transitionToLeadReview(config, ticketKey);
         if (transitionResult.emReviewDone) {
           const reviewComment = buildLeadReviewComment(config, allPRs, firstClaudeSummary, firstPlanOutput);
-          await addComment(config, ticketKey, reviewComment);
+          await postComment(ticketKey, reviewComment);
           log(`LEAD REVIEW transition and comment posted for ${ticketKey}`);
         }
       } catch (transitionError) {
@@ -369,7 +369,7 @@ export async function processTicket(config, ticketOrKey) {
       const noPrMsg = logUrl
         ? `Dr. Asthana: No PRs created. Manual implementation may be needed.\n\nRun Log: ${logUrl}`
         : 'Dr. Asthana: No PRs created. Manual implementation may be needed.';
-      await addComment(config, ticketKey, noPrMsg);
+      await postComment(ticketKey, noPrMsg);
       finalizeRun(false, 'No PRs created');
       return { success: false, reason: 'no_prs_created' };
     }
@@ -380,7 +380,7 @@ export async function processTicket(config, ticketOrKey) {
     const logUrl = uploadLogFile(getRunLogPath());
 
     const jiraComment = buildJiraComment(config, allPRs, allFailures, firstClaudeSummary, logUrl);
-    await addComment(config, ticketKey, jiraComment);
+    await postComment(ticketKey, jiraComment);
 
     // Update labels
     await removeLabel(config, ticketKey, config.JIRA_LABEL);
@@ -418,7 +418,7 @@ export async function processTicket(config, ticketOrKey) {
       const failMsg = logUrl
         ? `Dr. Asthana failed: ${error.message}\n\nRun Log: ${logUrl}`
         : `Dr. Asthana failed: ${error.message}`;
-      await addComment(config, ticketKey, failMsg);
+      await postComment(ticketKey, failMsg);
       await notifyFailure(config, ticketKey, ticketOrKey.fields?.summary || ticketKey, error.message, logUrl);
     } catch (commentError) {
       err(`Failed to add error comment: ${commentError.message}`);
