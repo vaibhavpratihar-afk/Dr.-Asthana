@@ -45,7 +45,7 @@ src/
     git.js              — clone, branch, commit, push, cleanup; restores CLAUDE.md before committing
     base-tagger.js      — base image tag creation (auto-detected from Dockerfile)
     test-runner.js      — test detection (CLAUDE.md / package.json), execution, shouldRunTests change analysis
-    notifications.js    — Slack DMs, JIRA ADF comments (PR table, In-Progress, LEAD REVIEW), PR description builders
+    notifications.js    — Slack DMs, JIRA ADF comments (PR table, In-Progress, LEAD REVIEW), PR description builders, run log upload
     jira.js             — JIRA REST API (fetch tickets, get details, comment, add/remove labels, transitions)
     jira-transitions.js — JIRA status transitions via Claude Code headless subprocess (In-Progress, Dev Testing → EM Review)
     azure.js            — Azure DevOps PR creation via az CLI, existing PR detection (TF401179 fallback)
@@ -70,7 +70,7 @@ Step 3:   Check re-trigger (done labels + comment analysis)
 Steps 4-8: For each service/branch:
             Clone → Inject Rules → [Infra] → Claude (Plan → Implement → [Validate]) → Test → Commit → Push → Base tag → PR → Cleanup
 Step 8.5: Transition to LEAD REVIEW + plan/files/summary JIRA comment (only if PRs exist)
-Step 9:   PR notification comment + Slack DM + label updates
+Step 9:   Upload run log → PR notification comment + Slack DM + label updates
 ```
 
 ## Three-Pass Claude Invocation
@@ -121,6 +121,7 @@ Step 9:   PR notification comment + Slack DM + label updates
 - **JIRA:** Structured ADF comment with a table of PRs (service, branch, PR link), Claude's summary, and any failures in a warning panel. Trigger label is removed, versioned done labels are added.
 - **Slack:** DM to configured user with all PR links, ticket link, summary, and failure warnings.
 - **Failure:** Both JIRA comment and Slack DM on error, with error message.
+- **Run Log:** After each run, the log file is uploaded to Pixelbin CDN via `uploadLogFile()`. The CDN URL is included in JIRA comments and Slack DMs (success, failure, and no-PRs paths). Upload failures are non-blocking.
 
 ## Azure DevOps PR Creation
 - PRs created via `az repos pr create` with org/project from config.
@@ -139,6 +140,7 @@ Key sections:
 
 ## Logging
 - Run-level logging: each ticket run gets a unique ID (`YYYY-MM-DD_HH-MM-SS_TICKETKEY`), logs to `logs/YYYY-MM-DD/{runId}.log` and `{runId}.errors.log`.
+- `getRunLogPath()` returns the current log file path (must be called before `finalizeRun()` resets it).
 - Step tracking with durations (startStep/endStep).
 - Specialized log methods: `logApi` (HTTP requests), `logCmd` (shell commands), `logData` (structured data dumps).
 - Console output with ANSI colors; file output strips colors.

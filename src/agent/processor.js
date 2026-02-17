@@ -22,7 +22,7 @@ import { cloneAndBranch, commitAndPush, cleanup } from '../services/git.js';
 import { handleBaseTag } from '../services/base-tagger.js';
 import { runAgentProvider, getProviderLabel } from '../services/ai-provider.js';
 import { createPR } from '../services/azure.js';
-import { buildJiraComment, buildPRDescription, buildInProgressComment, buildLeadReviewComment, notifyAllPRs, notifyFailure } from '../services/notifications.js';
+import { buildJiraComment, buildPRDescription, buildInProgressComment, buildLeadReviewComment, notifyAllPRs, notifyFailure, uploadLogFile } from '../services/notifications.js';
 import { transitionToInProgress, transitionToLeadReview } from '../services/jira-transitions.js';
 import { startServices, stopServices } from '../services/infra.js';
 import { runTests, formatTestResults, shouldRunTests } from '../services/test-runner.js';
@@ -33,7 +33,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
 
-const { log, ok, warn, err, debug, logData, startStep, endStep, initRun, finalizeRun } = logger;
+const { log, ok, warn, err, debug, logData, startStep, endStep, initRun, finalizeRun, getRunLogPath } = logger;
 
 /**
  * Detect target Node.js version from ticket context or Dockerfile.base.
@@ -365,7 +365,11 @@ export async function processTicket(config, ticketOrKey) {
     // Aggregate results and report
     if (allPRs.length === 0) {
       warn('No PRs created across any service/branch');
-      await addComment(config, ticketKey, 'Dr. Asthana: No PRs created. Manual implementation may be needed.');
+      const logUrl = uploadLogFile(getRunLogPath());
+      const noPrMsg = logUrl
+        ? `Dr. Asthana: No PRs created. Manual implementation may be needed.\n\nRun Log: ${logUrl}`
+        : 'Dr. Asthana: No PRs created. Manual implementation may be needed.';
+      await addComment(config, ticketKey, noPrMsg);
       finalizeRun(false, 'No PRs created');
       return { success: false, reason: 'no_prs_created' };
     }
@@ -373,7 +377,9 @@ export async function processTicket(config, ticketOrKey) {
     // JIRA comment — structured ADF with PR table and summary
     startStep(9, 'Update JIRA and send notifications');
 
-    const jiraComment = buildJiraComment(config, allPRs, allFailures, firstClaudeSummary);
+    const logUrl = uploadLogFile(getRunLogPath());
+
+    const jiraComment = buildJiraComment(config, allPRs, allFailures, firstClaudeSummary, logUrl);
     await addComment(config, ticketKey, jiraComment);
 
     // Update labels
@@ -391,7 +397,7 @@ export async function processTicket(config, ticketOrKey) {
     }
 
     // Slack notification — all PRs with links
-    await notifyAllPRs(config, ticketKey, ticket.summary, allPRs, allFailures, firstClaudeSummary);
+    await notifyAllPRs(config, ticketKey, ticket.summary, allPRs, allFailures, firstClaudeSummary, logUrl);
     endStep(true, 'JIRA comment and Slack notification sent');
 
     const allPrIds = allPRs.map(pr => pr.prId);
@@ -408,8 +414,12 @@ export async function processTicket(config, ticketOrKey) {
     err(`Error processing ${ticketKey}: ${error.message}`);
     err(`Stack trace: ${error.stack}`);
     try {
-      await addComment(config, ticketKey, `Dr. Asthana failed: ${error.message}`);
-      await notifyFailure(config, ticketKey, ticketOrKey.fields?.summary || ticketKey, error.message);
+      const logUrl = uploadLogFile(getRunLogPath());
+      const failMsg = logUrl
+        ? `Dr. Asthana failed: ${error.message}\n\nRun Log: ${logUrl}`
+        : `Dr. Asthana failed: ${error.message}`;
+      await addComment(config, ticketKey, failMsg);
+      await notifyFailure(config, ticketKey, ticketOrKey.fields?.summary || ticketKey, error.message, logUrl);
     } catch (commentError) {
       err(`Failed to add error comment: ${commentError.message}`);
     }
