@@ -128,8 +128,8 @@ export function buildPRDescription(claudeSummary, testResults) {
  * Shows a table of PRs with clickable links, grouped by service.
  */
 export function buildJiraComment(config, allPRs, allFailures, claudeSummary) {
-  const azdoBase = config.AZDO_ORG || 'https://dev.azure.com/GoFynd';
-  const project = config.AZDO_PROJECT || 'FyndPlatformCore';
+  const azdoBase = config.AZDO_ORG;
+  const project = config.AZDO_PROJECT;
 
   const content = [];
 
@@ -302,8 +302,8 @@ export function buildInProgressComment(config, ticket) {
  * Shows implementation plan, files changed, summary, and PR table.
  */
 export function buildLeadReviewComment(config, allPRs, claudeSummary, planOutput) {
-  const azdoBase = config.AZDO_ORG || 'https://dev.azure.com/GoFynd';
-  const project = config.AZDO_PROJECT || 'FyndPlatformCore';
+  const azdoBase = config.AZDO_ORG;
+  const project = config.AZDO_PROJECT;
 
   const content = [];
 
@@ -405,8 +405,8 @@ export async function notifyAllPRs(config, ticketKey, ticketSummary, allPRs, all
     const conversation = await client.conversations.open({ users: config.SLACK_USER_ID });
     const dmChannelId = conversation.channel.id;
 
-    const azdoBase = config.AZDO_ORG || 'https://dev.azure.com/GoFynd';
-    const project = config.AZDO_PROJECT || 'FyndPlatformCore';
+    const azdoBase = config.AZDO_ORG;
+    const project = config.AZDO_PROJECT;
 
     // Build per-PR lines with links
     const prLines = allPRs.map(pr => {

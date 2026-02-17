@@ -43,10 +43,10 @@ logs/                      — run logs, error logs, Claude pass outputs, and te
 
 ## How It Works
 
-1. Agent polls JIRA for tickets with the `patient-dr-asthana` label.
+1. Agent polls JIRA for tickets with the configured trigger label.
 2. Fetches and parses ticket details (title, description, comments, affected systems, fix versions).
 3. Validates required fields (affected systems, fix versions, known services).
-4. **Transitions ticket to In-Progress** — spawns a Claude Code subprocess against `~/Desktop/jira-creator/` to call the JIRA REST API. Posts a detailed ADF comment showing services, branches, and ticket context.
+4. **Transitions ticket to In-Progress** — uses the JIRA REST API. Posts a detailed ADF comment showing services, branches, and ticket context.
 5. Checks for re-triggers — if done labels exist, analyzes comments with a lightweight Claude call to determine which versions need rework.
 6. For each affected service x target branch:
    a. Clones the repo into `.tmp/` and creates a feature branch.
@@ -65,6 +65,10 @@ logs/                      — run logs, error logs, Claude pass outputs, and te
 9. Sends a Slack DM with all PR links.
 10. Removes the trigger label, adds versioned done labels.
 
+## Supported Services
+
+This bot can be configured for any Node.js service by adding entries to the `services` map in `config.json`. See `config.example.json` for the expected structure.
+
 ## Configuration
 
 Edit `config.json` in the project root. Key sections:
@@ -78,12 +82,23 @@ Edit `config.json` in the project root. Key sections:
 | `agent` | pollInterval (300s), maxTicketsPerCycle (1), logDir |
 | `provider` | top-level AI provider switch: `claude` |
 | `claude` | Claude provider settings: maxTurns (250), planTurns (20), validationTurns (30), timeoutMinutes (30), runTests (true) |
-| `infra` | enabled, scriptsDir, stopAfterProcessing |
+| `infra` | enabled, scriptsDir, stopAfterProcessing (see note below) |
+
+## Infrastructure (Optional)
+
+The agent can optionally start/stop local infrastructure services (MongoDB, Redis, Kafka) before running tests. This is **disabled by default** and requires you to provide your own start/stop shell scripts.
+
+To enable, set `infra.enabled: true` in `config.json` and point `infra.scriptsDir` to a directory containing:
+- `run_services.sh` — starts all required services
+- `stop-services.sh` — stops all services
+
+If you already have these services running (e.g. via Docker Compose, Homebrew, or cloud), set `infra.enabled: false` and the agent will assume they're available.
 
 ## Setup
 
 ```bash
 npm install
+cp config.example.json config.json  # then fill in your values
 ```
 
 Ensure `az` CLI is authenticated for Azure DevOps and `claude` CLI is available on PATH.

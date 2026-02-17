@@ -22,7 +22,7 @@ function ensureLogDir(logDir) {
 /**
  * Detect if a ticket is a re-trigger and determine which branches to process.
  *
- * Detection: checks for existing `dr-asthana-done-{version}` or bare `dr-asthana-done` labels.
+ * Detection: checks for existing done labels (versioned or bare) matching config.JIRA_LABEL_PROCESSED.
  * If re-triggered, analyzes comments with a lightweight Claude call to determine which
  * versions need rework. Falls back to processing all versions on any failure.
  *
@@ -34,7 +34,7 @@ export async function detectAndFilterRetrigger(config, ticket) {
   const donePrefix = config.JIRA_LABEL_PROCESSED;
   const bareDoneLabel = donePrefix;
 
-  // Find done labels — versioned (e.g., dr-asthana-done-1.10.3) or bare (dr-asthana-done)
+  // Find done labels — versioned (e.g., {donePrefix}-1.10.3) or bare ({donePrefix})
   const doneLabels = ticket.labels.filter(
     label => label === bareDoneLabel || label.startsWith(donePrefix + '-')
   );
@@ -53,7 +53,7 @@ export async function detectAndFilterRetrigger(config, ticket) {
         }
         return null;
       }
-      return label.substring(donePrefix.length + 1); // strip "dr-asthana-done-"
+      return label.substring(donePrefix.length + 1); // strip "{donePrefix}-"
     })
     .filter(Boolean);
 
@@ -129,7 +129,7 @@ All versions on this ticket: ${allVersions.join(', ')}
 The user re-added the bot's label to request rework. Read the comments below and determine which versions need to be re-processed.
 
 IMPORTANT:
-- Ignore any comments authored by "Dr. Asthana" — those are bot-generated.
+- Ignore any comments authored by the bot — those are bot-generated.
 - If the comments clearly indicate specific versions need rework, return only those.
 - If the comments are unclear or don't mention specific versions, return ALL versions.
 - Consider phrases like "looks good", "works fine", "approved" as NOT needing rework.

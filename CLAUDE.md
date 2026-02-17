@@ -26,7 +26,7 @@ The bot is invoked via `node src/index.js <command>`:
 
 ## Working Directory
 - Repos are cloned into `.tmp/` within the project root (not the system temp directory).
-- Each clone gets a unique subdirectory under `.tmp/dr-asthana-*`.
+- Each clone gets a unique subdirectory under `.tmp/agent-*`.
 - `.tmp/` is git-ignored and cleaned up automatically after each run.
 
 ## Directory Structure
@@ -83,7 +83,7 @@ Step 9:   PR notification comment + Slack DM + label updates
 - **Output selection:** `pickBestOutput` prefers structured output (contains FILES CHANGED/SUMMARY/RISKS), falls back to first non-garbage response, skips rate-limit errors and suspiciously short responses.
 
 ## Re-trigger Detection
-- Detects when a ticket has been re-triggered by checking for existing `dr-asthana-done-{version}` or bare `dr-asthana-done` labels.
+- Detects when a ticket has been re-triggered by checking for existing done labels (versioned or bare) matching the configured `labelProcessed` value.
 - Uses a lightweight Claude call (1 turn, no tools, 60s timeout) to analyze JIRA comments and determine which versions need rework.
 - Falls back to processing all versions if analysis fails or returns empty.
 - New versions (no done label) are always included regardless of analysis result.
@@ -96,7 +96,7 @@ Step 9:   PR notification comment + Slack DM + label updates
 
 ## Base Image Tagging
 - Base tags are auto-detected from each repo's `Dockerfile` — no per-service config needed.
-- Three conditions must be met: `Dockerfile` with a matching `harbor-core.fynd.engineering/base-images/.../` FROM line, `Dockerfile.base`, and `azure-pipelines.yml` all present.
+- Three conditions must be met: `Dockerfile` with a matching base-images registry FROM line, `Dockerfile.base`, and `azure-pipelines.yml` all present.
 - Tag prefix is always `deploy.base`, format: `deploy.base.vMAJOR-MINOR-PATCH-BUILD`.
 - Only triggered when `package.json` or `package-lock.json` change in the committed diff.
 - 2.x version branches use upstream Node.js images (no base image pipeline), so base tagging is automatically skipped.
@@ -109,13 +109,13 @@ Step 9:   PR notification comment + Slack DM + label updates
 - On test failure, full stdout+stderr is saved to `logs/test-<name>-<timestamp>.log` for post-mortem debugging. The run log shows the last 30 lines of stdout (where test frameworks print failure summaries).
 
 ## JIRA Status Transitions
-- **In-Progress** (Step 2.5): Triggered immediately after ticket validation, before any code work begins. Uses a lightweight Claude Code headless subprocess pointed at `~/Desktop/jira-creator/` to call the JIRA REST API. Posts a rich ADF comment showing the ticket context (summary, description), a table of services/repos/branches being targeted, and scope.
+- **In-Progress** (Step 2.5): Triggered immediately after ticket validation, before any code work begins. Uses the JIRA REST API directly. Posts a rich ADF comment showing the ticket context (summary, description), a table of services/repos/branches being targeted, and scope.
 - **LEAD REVIEW** (Step 8.5): Triggered after all services are processed and PRs exist. Two-step transition via Claude subprocess:
   1. Dev Testing — browser-based via `node jira-transition.mjs <key> "Dev Testing"` (handles screen/validator requirements)
   2. EM Review — REST API with transition ID 331 (after 3-second pause for JIRA to process)
   Posts an ADF comment with Claude's implementation plan, files changed, summary, and PR table.
 - **Non-blocking**: All transition calls are wrapped in try/catch. Failures log `warn()` and never block the pipeline. JIRA comments are only posted on successful transitions.
-- **Claude subprocess**: Spawned with `--max-turns 3 --output-format text --dangerously-skip-permissions`, 2-minute timeout per transition. Working directory: `~/Desktop/jira-creator/` (contains `CLAUDE.md` with full transition workflow, `jira-transition.mjs` for browser transitions, `jira-config.json` for credentials).
+- **Claude subprocess**: Spawned with `--max-turns 3 --output-format text --dangerously-skip-permissions`, 2-minute timeout per transition. Working directory is configurable via `JIRA_CREATOR_DIR` env var (contains transition workflow scripts and credentials).
 
 ## Notifications
 - **JIRA:** Structured ADF comment with a table of PRs (service, branch, PR link), Claude's summary, and any failures in a warning panel. Trigger label is removed, versioned done labels are added.
@@ -145,11 +145,7 @@ Key sections:
 - Claude pass outputs saved to `logs/{ticketKey}-{pass}-{timestamp}.log`.
 
 ## Reference Service Repos
-Local copies of all service repos are available at `/Users/vaibhavpratihar/Desktop/services/` for read-only verification. Use these to inspect code, check branch contents, and verify patterns — **never clone into or modify these directories**.
-
-Available services: blitzkrieg, convex, highbrow, jetfire, skyfire, scattershot (plus others not managed by this bot).
-
-Use `git show <branch>:<path>` within these repos to inspect files on any branch without switching.
+If you have local copies of service repos, you can use them for read-only verification. Use `git show <branch>:<path>` to inspect files on any branch without switching — **never clone into or modify reference directories**.
 
 ## Output Format
 When done, summarize:

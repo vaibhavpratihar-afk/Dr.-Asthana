@@ -4,6 +4,7 @@
 
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 import { err } from './logger.js';
 
 const CONFIG_PATH = path.join(process.cwd(), 'config.json');
@@ -129,7 +130,7 @@ export function loadConfig() {
 
     // Infrastructure
     INFRA_ENABLED: rawConfig.infra?.enabled ?? true,
-    INFRA_SCRIPTS_DIR: rawConfig.infra?.scriptsDir || '/Users/vaibhavpratihar/Desktop/local-resource-running',
+    INFRA_SCRIPTS_DIR: rawConfig.infra?.scriptsDir || path.join(os.homedir(), 'local-resource-running'),
     INFRA_STOP_AFTER: rawConfig.infra?.stopAfterProcessing ?? false,
   };
 

@@ -38,7 +38,7 @@ export function scoreComplexity(ticket, baseConfig = {}) {
 
   // Signal 2: Human comment count (exclude bot comments)
   const humanComments = comments.filter(
-    (c) => !c.author?.toLowerCase().includes('dr. asthana') && !c.author?.toLowerCase().includes('automation')
+    (c) => !c.author?.toLowerCase().includes('automation')
   );
   const humanCount = humanComments.length;
   if (humanCount >= 5) {
