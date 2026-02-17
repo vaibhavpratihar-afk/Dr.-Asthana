@@ -1,40 +1,36 @@
 /**
- * JIRA Status Transitions
+ * JIRA CLI Operations
  *
- * Uses jira-cli.mjs for all transitions. The CLI handles:
+ * Uses jira-cli.mjs for transitions and comments. The CLI handles:
  *   - REST API first (fast path)
  *   - Automatic browser fallback for hasScreen transitions (Dev Testing, etc.)
  *   - QC Report validators, attachment fields, etc.
- *
- * Two transitions:
- *   1. In-Progress  — jira-cli.mjs transition
- *   2. LEAD REVIEW  — two-step: Dev Testing → EM Review (both via jira-cli.mjs)
+ *   - Markdown → ADF conversion for comments
  */
 
 import { spawn } from 'child_process';
+import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
 import { log, warn, debug } from '../logger.js';
 
 const JIRA_CREATOR_DIR = process.env.JIRA_CREATOR_DIR || path.join(os.homedir(), 'Desktop', 'jira-creator');
 const TRANSITION_TIMEOUT = 2 * 60 * 1000; // 2 minutes per transition
+const COMMENT_TIMEOUT = 60 * 1000; // 1 minute for comments
 
 /**
- * Run a JIRA transition via jira-cli.mjs.
- * Handles API-first with automatic browser fallback.
+ * Generic runner for jira-cli.mjs commands.
  * Never throws; returns { success, output, exitCode }.
  */
-async function runJiraCliTransition(ticketKey, transitionName, label) {
-  log(`[transition:${label}] Running jira-cli.mjs transition "${transitionName}"...`);
-
-  const args = ['jira-cli.mjs', 'transition', ticketKey, transitionName];
+async function runJiraCli(args, label, timeoutMs = COMMENT_TIMEOUT) {
+  log(`[jira-cli:${label}] Running: node jira-cli.mjs ${args.join(' ').substring(0, 80)}...`);
 
   try {
     const result = await new Promise((resolve, reject) => {
       let stdout = '';
       let stderr = '';
 
-      const proc = spawn('node', args, {
+      const proc = spawn('node', ['jira-cli.mjs', ...args], {
         cwd: JIRA_CREATOR_DIR,
         env: { ...process.env },
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -52,36 +48,44 @@ async function runJiraCliTransition(ticketKey, transitionName, label) {
 
       const timeoutId = setTimeout(() => {
         proc.kill('SIGTERM');
-        reject(new Error(`Transition (${label}) timed out after 2 minutes`));
-      }, TRANSITION_TIMEOUT);
+        reject(new Error(`jira-cli (${label}) timed out after ${Math.round(timeoutMs / 1000)}s`));
+      }, timeoutMs);
 
       proc.on('close', (code) => {
         clearTimeout(timeoutId);
-        log(`[transition:${label}] jira-cli.mjs finished: exit=${code}`);
+        log(`[jira-cli:${label}] finished: exit=${code}`);
         if (stderr.trim()) {
-          debug(`[transition:${label}:stderr] ${stderr.trim().substring(0, 500)}`);
+          debug(`[jira-cli:${label}:stderr] ${stderr.trim().substring(0, 500)}`);
         }
         resolve({ output: stdout, exitCode: code });
       });
 
       proc.on('error', (error) => {
         clearTimeout(timeoutId);
-        reject(new Error(`Failed to spawn jira-cli.mjs for transition (${label}): ${error.message}`));
+        reject(new Error(`Failed to spawn jira-cli.mjs (${label}): ${error.message}`));
       });
     });
 
     const success = result.exitCode === 0;
     if (!success) {
-      warn(`[transition:${label}] jira-cli.mjs exited with code ${result.exitCode}`);
-      debug(`[transition:${label}] Output: ${result.output.substring(0, 500)}`);
+      warn(`[jira-cli:${label}] exited with code ${result.exitCode}`);
+      debug(`[jira-cli:${label}] Output: ${result.output.substring(0, 500)}`);
     }
 
     return { success, output: result.output, exitCode: result.exitCode };
 
   } catch (error) {
-    warn(`[transition:${label}] Failed: ${error.message}`);
+    warn(`[jira-cli:${label}] Failed: ${error.message}`);
     return { success: false, output: error.message, exitCode: null };
   }
+}
+
+/**
+ * Run a JIRA transition via jira-cli.mjs.
+ * Thin wrapper around runJiraCli for transitions.
+ */
+function runJiraCliTransition(ticketKey, transitionName, label) {
+  return runJiraCli(['transition', ticketKey, transitionName], label, TRANSITION_TIMEOUT);
 }
 
 /**
@@ -138,4 +142,36 @@ export async function transitionToLeadReview(config, ticketKey) {
 
   log(`${ticketKey} transitioned to EM Review (LEAD REVIEW)`);
   return { devTestingDone: true, emReviewDone: true };
+}
+
+/**
+ * Post a Markdown comment to a JIRA ticket via jira-cli.mjs.
+ * Writes markdown to a temp file, passes it with --file flag.
+ * Non-blocking: catches all errors, logs warnings, never throws.
+ *
+ * @param {string} ticketKey - e.g. "JCP-1234"
+ * @param {string} markdownText - Comment body in Markdown
+ * @returns {Promise<boolean>} true if posted successfully
+ */
+export async function postComment(ticketKey, markdownText) {
+  const tmpFile = path.join(os.tmpdir(), `jira-comment-${ticketKey}-${Date.now()}.md`);
+
+  try {
+    await fs.writeFile(tmpFile, markdownText, 'utf-8');
+
+    const result = await runJiraCli(
+      ['comment', 'add', ticketKey, '--file', tmpFile],
+      `comment-${ticketKey}`,
+      COMMENT_TIMEOUT
+    );
+
+    return result.success;
+  } catch (error) {
+    warn(`Failed to post comment to ${ticketKey}: ${error.message}`);
+    return false;
+  } finally {
+    try {
+      await fs.unlink(tmpFile);
+    } catch { /* temp file cleanup is best-effort */ }
+  }
 }
