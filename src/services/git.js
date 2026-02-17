@@ -64,7 +64,7 @@ export async function cloneAndBranch(config, repoUrl, baseBranch, ticketKey, tic
   if (!fs.existsSync(LOCAL_TMP_BASE)) {
     fs.mkdirSync(LOCAL_TMP_BASE, { recursive: true });
   }
-  const tmpDir = fs.mkdtempSync(path.join(LOCAL_TMP_BASE, 'dr-asthana-'));
+  const tmpDir = fs.mkdtempSync(path.join(LOCAL_TMP_BASE, 'agent-'));
   log(`Created temp directory: ${tmpDir}`);
 
   try {

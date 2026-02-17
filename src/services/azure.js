@@ -37,7 +37,7 @@ export async function createPR(config, tmpDir, sourceBranch, targetBranch, ticke
     const remoteUrl = execSync('git remote get-url origin', {
       cwd: tmpDir, encoding: 'utf-8', stdio: 'pipe',
     }).trim();
-    // Extract repo name from URL like git@ssh.dev.azure.com:v3/GoFynd/FyndPlatformCore/convex
+    // Extract repo name from the last segment of the remote URL
     repoName = remoteUrl.split('/').pop().replace('.git', '');
     log(`Detected repo name: ${repoName}`);
   } catch (e) {

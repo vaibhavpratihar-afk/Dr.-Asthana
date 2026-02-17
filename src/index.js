@@ -126,7 +126,7 @@ Configuration:
   Edit config.json in the project root.
 
 Labels:
-  Add "${process.env.JIRA_LABEL || 'patient-dr-asthana'}" label to tickets for processing.
+  Add your configured JIRA trigger label to tickets for processing.
 `);
 }
 

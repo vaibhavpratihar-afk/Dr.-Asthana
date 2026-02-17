@@ -1,0 +1,55 @@
+{
+  "provider": "claude",
+  "jira": {
+    "baseUrl": "https://your-org.atlassian.net",
+    "email": "you@example.com",
+    "apiToken": "YOUR_JIRA_API_TOKEN",
+    "label": "your-trigger-label",
+    "labelProcessed": "your-done-label",
+    "maxComments": 100,
+    "fields": {
+      "affectedSystems": "customfield_10056",
+      "fixVersions": "fixVersions"
+    }
+  },
+  "azureDevOps": {
+    "org": "https://dev.azure.com/YOUR_ORG",
+    "project": "YOUR_PROJECT",
+    "repoBaseUrl": "git@ssh.dev.azure.com:v3/YOUR_ORG/YOUR_PROJECT"
+  },
+  "services": {
+    "my-service": {
+      "repo": "my-service",
+      "component": "Component Name",
+      "componentId": "12345",
+      "lead": "Team Lead Name"
+    }
+  },
+  "slack": {
+    "botToken": "xoxb-YOUR-SLACK-BOT-TOKEN",
+    "userId": "UXXXXXXXXXX"
+  },
+  "agent": {
+    "pollInterval": 300,
+    "maxTicketsPerCycle": 1,
+    "logDir": "./logs"
+  },
+  "infra": {
+    "enabled": true,
+    "scriptsDir": "/path/to/infra-scripts",
+    "stopAfterProcessing": false
+  },
+  "claude": {
+    "maxTurns": 150,
+    "planTurns": 20,
+    "validationTurns": 30,
+    "allowedTools": "Read,Write,Edit,Bash,Glob,Grep,Task",
+    "timeoutMinutes": 60,
+    "planTimeoutMinutes": 10,
+    "runTests": true,
+    "continuationTurns": 150,
+    "maxContinuations": 2,
+    "continuationTimeoutMinutes": 30,
+    "complexityScaling": true
+  }
+}

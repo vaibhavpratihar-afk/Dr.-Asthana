@@ -16,7 +16,7 @@ import os from 'os';
 import { log, warn, debug } from '../logger.js';
 import { transitionTicket, getTicketStatus } from './jira.js';
 
-const JIRA_CREATOR_DIR = path.join(os.homedir(), 'Desktop', 'jira-creator');
+const JIRA_CREATOR_DIR = process.env.JIRA_CREATOR_DIR || path.join(os.homedir(), 'jira-creator');
 const TRANSITION_TIMEOUT = 2 * 60 * 1000; // 2 minutes per transition
 
 /**

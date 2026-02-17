@@ -47,7 +47,7 @@ function execGit(cmd, cwd, timeout = CMD_TIMEOUT) {
  *
  * @param {string} tmpDir - Working directory (feature branch, already committed+pushed)
  * @param {string} baseBranch - The base branch name (e.g. version/1.10.6)
- * @param {string} repoName - The repo/service name (e.g. "convex", "highbrow")
+ * @param {string} repoName - The repo/service name
  * @returns {{ tagged: boolean, tag?: string }} result
  */
 export function handleBaseTag(tmpDir, baseBranch, repoName) {
@@ -63,7 +63,7 @@ export function handleBaseTag(tmpDir, baseBranch, repoName) {
 
   // Verify Dockerfile FROM line references this service's base image
   const dockerfile = fs.readFileSync(dockerfilePath, 'utf-8');
-  const fromMatch = dockerfile.match(/^FROM\s+(harbor-core\.fynd\.engineering\/base-images\/\S+?):\S+/m);
+  const fromMatch = dockerfile.match(/^FROM\s+([\w.\-]+\/base-images\/\S+?):\S+/m);
   if (!fromMatch || !fromMatch[1].endsWith(`/${repoName}`)) {
     log(`Dockerfile FROM line does not match base-images registry for ${repoName}, skipping base tag`);
     return { tagged: false };
