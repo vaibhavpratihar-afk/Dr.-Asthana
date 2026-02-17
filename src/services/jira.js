@@ -7,52 +7,6 @@ import { getAuthHeader } from '../config.js';
 import { log, warn } from '../logger.js';
 
 /**
- * Fetch tickets matching the configured label and criteria
- */
-export async function fetchTickets(config) {
-  // Only filter by label - let the agent process any ticket with the label
-  const jql = `labels = "${config.JIRA_LABEL}" ORDER BY priority DESC`;
-  log(`JQL: ${jql}`);
-  const fields = [
-    'summary',
-    'description',
-    'comment',
-    'issuetype',
-    'priority',
-    'status',
-    'labels',
-    config.JIRA_FIELDS.affectedSystems,
-    config.JIRA_FIELDS.fixVersions,
-  ];
-  const url = `${config.JIRA_BASE_URL}/rest/api/3/search/jql`;
-
-  log(`Fetching tickets with label "${config.JIRA_LABEL}"...`);
-
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      Authorization: getAuthHeader(config),
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    },
-    body: JSON.stringify({
-      jql,
-      maxResults: config.MAX_TICKETS_PER_CYCLE,
-      fields,
-    }),
-  });
-
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`JIRA search failed (${response.status}): ${text}`);
-  }
-
-  const data = await response.json();
-  log(`Found ${data.issues?.length || 0} ticket(s)`);
-  return data.issues || [];
-}
-
-/**
  * Fetch all comments for a ticket, paginating through JIRA's API.
  * JIRA's issue endpoint caps inline comments at ~20; this fetches all of them.
  */
@@ -201,67 +155,8 @@ export async function transitionTicket(config, ticketKey, targetStatusName) {
   return true;
 }
 
-/**
- * Add a label to a ticket
- */
-export async function addLabel(config, ticketKey, label) {
-  const url = `${config.JIRA_BASE_URL}/rest/api/3/issue/${ticketKey}`;
-
-  const response = await fetch(url, {
-    method: 'PUT',
-    headers: {
-      Authorization: getAuthHeader(config),
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    },
-    body: JSON.stringify({
-      update: { labels: [{ add: label }] },
-    }),
-  });
-
-  if (!response.ok) {
-    const responseText = await response.text();
-    warn(`Failed to add label "${label}" to ${ticketKey}: ${responseText}`);
-    return false;
-  }
-
-  log(`Added label "${label}" to ${ticketKey}`);
-  return true;
-}
-
-/**
- * Remove a label from a ticket
- */
-export async function removeLabel(config, ticketKey, label) {
-  const url = `${config.JIRA_BASE_URL}/rest/api/3/issue/${ticketKey}`;
-
-  const response = await fetch(url, {
-    method: 'PUT',
-    headers: {
-      Authorization: getAuthHeader(config),
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    },
-    body: JSON.stringify({
-      update: { labels: [{ remove: label }] },
-    }),
-  });
-
-  if (!response.ok) {
-    const responseText = await response.text();
-    warn(`Failed to remove label "${label}" from ${ticketKey}: ${responseText}`);
-    return false;
-  }
-
-  log(`Removed label "${label}" from ${ticketKey}`);
-  return true;
-}
-
 export default {
-  fetchTickets,
   getTicketDetails,
   getTicketStatus,
   transitionTicket,
-  addLabel,
-  removeLabel,
 };

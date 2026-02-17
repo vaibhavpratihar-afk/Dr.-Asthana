@@ -17,13 +17,13 @@ import { fileURLToPath } from 'url';
 import { parseTicket, displayTicketDetails } from './ticket.js';
 import { scoreComplexity } from './complexity.js';
 import { detectAndFilterRetrigger } from './retrigger.js';
-import { getTicketDetails, addLabel, removeLabel } from '../services/jira.js';
+import { getTicketDetails } from '../services/jira.js';
 import { cloneAndBranch, commitAndPush, cleanup } from '../services/git.js';
 import { handleBaseTag } from '../services/base-tagger.js';
 import { runAgentProvider, getProviderLabel } from '../services/ai-provider.js';
 import { createPR } from '../services/azure.js';
 import { buildJiraComment, buildPRDescription, buildInProgressComment, buildLeadReviewComment, notifyAllPRs, notifyFailure, uploadLogFile } from '../services/notifications.js';
-import { transitionToInProgress, transitionToLeadReview, postComment } from '../services/jira-transitions.js';
+import { transitionToInProgress, transitionToLeadReview, postComment, addLabel, removeLabel } from '../services/jira-transitions.js';
 import { startServices, stopServices } from '../services/infra.js';
 import { runTests, formatTestResults, shouldRunTests } from '../services/test-runner.js';
 import { getServiceConfig } from '../config.js';
@@ -276,11 +276,11 @@ export async function processTicket(config, ticketOrKey) {
           const versionedLabel = `${config.JIRA_LABEL_PROCESSED}-${tb.version}`;
           if (ticket.labels.includes(versionedLabel)) {
             log(`Removing done label: ${versionedLabel}`);
-            await removeLabel(config, ticket.key, versionedLabel);
+            await removeLabel(ticket.key, versionedLabel);
           }
           // Also remove bare done label if present
           if (ticket.labels.includes(config.JIRA_LABEL_PROCESSED)) {
-            await removeLabel(config, ticket.key, config.JIRA_LABEL_PROCESSED);
+            await removeLabel(ticket.key, config.JIRA_LABEL_PROCESSED);
           }
         }
 
@@ -297,7 +297,7 @@ export async function processTicket(config, ticketOrKey) {
         for (const label of (ticket.labels || [])) {
           if (label === config.JIRA_LABEL_PROCESSED || label.startsWith(config.JIRA_LABEL_PROCESSED + '-')) {
             log(`Removing done label: ${label}`);
-            await removeLabel(config, ticket.key, label);
+            await removeLabel(ticket.key, label);
           }
         }
         endStep(true, 'Re-trigger: processing all versions (fallback)');
@@ -383,7 +383,7 @@ export async function processTicket(config, ticketOrKey) {
     await postComment(ticketKey, jiraComment);
 
     // Update labels
-    await removeLabel(config, ticketKey, config.JIRA_LABEL);
+    await removeLabel(ticketKey, config.JIRA_LABEL);
     const addedLabels = new Set();
     for (const pr of allPRs) {
       const versionMatch = pr.baseBranch.match(/version\/(.+)/);
@@ -391,7 +391,7 @@ export async function processTicket(config, ticketOrKey) {
         ? `${config.JIRA_LABEL_PROCESSED}-${versionMatch[1]}`
         : config.JIRA_LABEL_PROCESSED;
       if (!addedLabels.has(processedLabel)) {
-        await addLabel(config, ticketKey, processedLabel);
+        await addLabel(ticketKey, processedLabel);
         addedLabels.add(processedLabel);
       }
     }
