@@ -27,7 +27,8 @@ The bot is invoked via `node src/index.js <command>`:
 
 ## Working Directory
 - Repos are cloned into `.tmp/` within the project root (not the system temp directory).
-- Each clone gets a unique subdirectory under `.tmp/agent-*`.
+- Implementation clones get a unique subdirectory under `.tmp/agent-*`.
+- Planning clones (master plan for multi-branch) get `.tmp/plan-*` subdirectories.
 - `.tmp/` is git-ignored and cleaned up automatically after each run.
 
 ## Directory Structure
@@ -42,8 +43,8 @@ src/
     ticket.js           — ticket parsing, ADF text extraction, fix-version-to-branch mapping
   services/
     claude.js           — three-pass Claude invocation (plan -> implement -> validate), stream-json parsing, rate-limit handling
-    prompt-builder.js   — ticket context prompt only (key, title, description, comments)
-    git.js              — clone, branch, commit, push, cleanup; restores CLAUDE.md before committing
+    prompt-builder.js   — ticket context prompt + multi-branch master planning prompt
+    git.js              — clone, branch, commit, push, cleanup, planning clone; restores CLAUDE.md before committing
     base-tagger.js      — base image tag creation (auto-detected from Dockerfile)
     test-runner.js      — test detection (CLAUDE.md / package.json), execution, shouldRunTests change analysis
     notifications.js    — Slack DMs, JIRA comment builders (PR table, In-Progress, LEAD REVIEW), PR description builders, run log upload
@@ -61,21 +62,24 @@ config.json                — runtime configuration (JIRA, Azure DevOps, servic
 - Each branch gets a fresh clone, processes completely (Clone -> Inject Rules -> Plan -> Implement -> [Validate] -> Test -> Commit -> Push -> Base tag -> PR -> Cleanup), then the next branch starts.
 - No shared git state between branches; each is fully isolated.
 - Multi-version tickets: each fix version produces a separate branch and PR per service.
+- **Multi-branch master planning:** For tickets with 2+ target branches, a single master plan pass runs before the branch loop. The plan clone fetches all branches as remote refs, Claude produces per-branch plan sections (with `### BRANCH:` headers), and each branch's implementation pass receives its section as an external plan (skipping per-branch plan pass). If the master plan fails at any point, affected branches gracefully fall back to per-branch planning.
 
 ## Processing Pipeline
 ```
 Step 1:   Fetch & parse ticket
 Step 2:   Validate required fields
-Step 2.5: Transition to In-Progress + detailed JIRA comment (services, branches, ticket context)
+Step 2.5: Transition to In-Progress (Dev Started) + detailed JIRA comment (services, branches, ticket context)
 Step 3:   Check re-trigger (done labels + comment analysis)
-Steps 4-8: For each service/branch:
-            Clone → Inject Rules → [Infra] → Claude (Plan → Implement → [Validate]) → Test → Commit → Push → Base tag → PR → Cleanup
+Steps 4-8: For each service:
+            [Master Plan (multi-branch only): cloneForPlanning → spawnClaude → parseMultiBranchPlan → cleanup]
+            For each branch:
+              Clone → Inject Rules → [Infra] → Claude (Plan or External Plan → Implement → [Validate]) → Test → Commit → Push → Base tag → PR → Cleanup
 Step 8.5: Transition to LEAD REVIEW + plan/files/summary JIRA comment (only if PRs exist)
 Step 9:   Upload run log → PR notification comment + Slack DM + label updates
 ```
 
 ## Three-Pass Claude Invocation
-- **Pass 1 (Plan):** Explores the codebase and produces an implementation plan without making changes. Configured via `claude.planTurns` (default 20) and `claude.planTimeoutMinutes` (default 10). Plan is validated for quality — rejected if too short (<200 chars) or generic.
+- **Pass 1 (Plan):** Explores the codebase and produces an implementation plan without making changes. Configured via `claude.planTurns` (default 40) and `claude.planTimeoutMinutes` (default 30). Plan is validated for quality — rejected if too short (<200 chars) or generic. When an `externalPlan` is provided (from multi-branch master planning), the plan pass is skipped entirely and the external plan text is used directly.
 - **Pass 2 (Implement):** Executes the plan (or falls back to ticket context if planning failed). Uses `claude.maxTurns` (default 250) and `claude.timeoutMinutes` (default 30).
 - **Pass 3 (Validate):** Runs only if implementation didn't complete normally or hit max turns. Reviews current state, fixes issues, runs tests. Uses `claude.validationTurns` (default 30), 15-minute timeout.
 - All passes use `--dangerously-skip-permissions` and `--output-format stream-json`.
@@ -91,7 +95,8 @@ Step 9:   Upload run log → PR notification comment + Slack DM + label updates
 
 ## Git Operations
 - Feature branches: `feature/{ticketKey}-{sanitized-summary}` (single branch) or `feature/{ticketKey}-{sanitized-summary}-{version}` (multi-branch).
-- Shallow clone (`--depth=50`) for speed.
+- Shallow clone (`--depth=50`) for implementation, `--depth=100` for planning clones.
+- Planning clones (`cloneForPlanning`): shallow clone of primary branch, remaining branches fetched as remote refs. Used for multi-branch master planning. Temp dirs use `plan-` prefix. Non-fatal if individual branch fetch fails.
 - CLAUDE.md is always restored before committing — if the service has its own tracked CLAUDE.md, it's reset to HEAD; if copied from the bot's default, it's unstaged. Injected agent rules never reach the remote.
 - Force push on branch conflict (previous run left a remote branch).
 
@@ -112,7 +117,7 @@ Step 9:   Upload run log → PR notification comment + Slack DM + label updates
 ## JIRA CLI Operations (`jira-transitions.js`)
 All JIRA write and query operations are routed through `jira-cli.mjs` via `jira-transitions.js`. The only direct REST API calls remaining in `jira.js` are read-only (`getTicketDetails`, `getTicketStatus`) and the legacy `transitionTicket`.
 
-- **Transitions** (In-Progress, Dev Testing, EM Review): via `jira-cli.mjs transition`. API-first with automatic browser fallback for hasScreen transitions. 2-minute timeout.
+- **Transitions** (Dev Started, Dev Testing, EM Review): via `jira-cli.mjs transition`. API-first with automatic browser fallback for hasScreen transitions. 2-minute timeout.
 - **Comments**: via `jira-cli.mjs comment add --file`. Markdown written to temp file, posted, temp file cleaned up. Non-blocking.
 - **Search** (`searchTickets`): via `jira-cli.mjs search --jql --json`. Used by daemon and dry-run modes. **Throws on failure** (callers depend on error propagation). 30s timeout.
 - **Labels** (`addLabel`, `removeLabel`): via `jira-cli.mjs label add/remove`. Non-blocking (never throw). Used for trigger label removal and versioned done-label management.

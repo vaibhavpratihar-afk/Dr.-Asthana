@@ -89,16 +89,16 @@ function runJiraCliTransition(ticketKey, transitionName, label) {
 }
 
 /**
- * Transition ticket to In-Progress via jira-cli.mjs.
+ * Transition ticket to In-Progress (via "Dev Started") using jira-cli.mjs.
  *
  * @param {object} config - Configuration object (unused, kept for interface compat)
  * @param {string} ticketKey - e.g. "JCP-1234"
  * @returns {Promise<boolean>} true if transitioned successfully
  */
 export async function transitionToInProgress(config, ticketKey) {
-  log(`Transitioning ${ticketKey} to In-Progress...`);
+  log(`Transitioning ${ticketKey} to In-Progress (Dev Started)...`);
 
-  const result = await runJiraCliTransition(ticketKey, 'In-Progress', `in-progress-${ticketKey}`);
+  const result = await runJiraCliTransition(ticketKey, 'Dev Started', `in-progress-${ticketKey}`);
 
   if (result.success) {
     log(`${ticketKey} transitioned to In-Progress`);

@@ -18,9 +18,11 @@ import { parseTicket, displayTicketDetails } from './ticket.js';
 import { scoreComplexity } from './complexity.js';
 import { detectAndFilterRetrigger } from './retrigger.js';
 import { getTicketDetails } from '../services/jira.js';
-import { cloneAndBranch, commitAndPush, cleanup } from '../services/git.js';
+import { cloneAndBranch, cloneForPlanning, commitAndPush, cleanup } from '../services/git.js';
 import { handleBaseTag } from '../services/base-tagger.js';
 import { runAgentProvider, getProviderLabel } from '../services/ai-provider.js';
+import { spawnClaude, parseMultiBranchPlan, isGarbageOutput } from '../services/claude.js';
+import { buildMultiBranchPlanPrompt } from '../services/prompt-builder.js';
 import { createPR } from '../services/azure.js';
 import { buildJiraComment, buildPRDescription, buildInProgressComment, buildLeadReviewComment, notifyAllPRs, notifyFailure, uploadLogFile } from '../services/notifications.js';
 import { transitionToInProgress, transitionToLeadReview, postComment, addLabel, removeLabel } from '../services/jira-transitions.js';
@@ -216,10 +218,12 @@ export async function processTicket(config, ticketOrKey) {
           ...config,
           AGENT_MAX_TURNS: Math.max(config.AGENT_MAX_TURNS, complexity.recommendedMaxTurns),
           AGENT_PLAN_TURNS: Math.max(config.AGENT_PLAN_TURNS, complexity.recommendedPlanTurns),
+          AGENT_PLAN_TIMEOUT_MINUTES: Math.max(config.AGENT_PLAN_TIMEOUT_MINUTES, complexity.recommendedPlanTimeoutMinutes),
           AGENT_MAX_CONTINUATIONS: Math.max(config.AGENT_MAX_CONTINUATIONS || 0, complexity.recommendedMaxContinuations),
           AGENT_ENABLE_PHASES: complexity.enablePhases,
           CLAUDE_MAX_TURNS: Math.max(config.AGENT_MAX_TURNS, complexity.recommendedMaxTurns),
           CLAUDE_PLAN_TURNS: Math.max(config.AGENT_PLAN_TURNS, complexity.recommendedPlanTurns),
+          CLAUDE_PLAN_TIMEOUT_MINUTES: Math.max(config.AGENT_PLAN_TIMEOUT_MINUTES, complexity.recommendedPlanTimeoutMinutes),
           CLAUDE_MAX_CONTINUATIONS: Math.max(config.AGENT_MAX_CONTINUATIONS || 0, complexity.recommendedMaxContinuations),
           CLAUDE_ENABLE_PHASES: complexity.enablePhases,
         }
@@ -439,7 +443,7 @@ export async function processTicket(config, ticketOrKey) {
  *
  * @returns {{ pr: object|null, error: string|null, claudeSummary: string }}
  */
-async function processBranch(config, ticket, serviceConfig, repoUrl, ticketKey, baseBranch, version = null, runCtx = {}) {
+async function processBranch(config, ticket, serviceConfig, repoUrl, ticketKey, baseBranch, version = null, runCtx = {}, externalPlan = null) {
   let tmpDir = null;
   const providerLabel = getProviderLabel(config);
 
@@ -487,7 +491,7 @@ async function processBranch(config, ticket, serviceConfig, repoUrl, ticketKey, 
       ticket.summary,
       ticket.description,
       ticket.comments,
-      { nvmBinDir, instructionFile }
+      { nvmBinDir, instructionFile, externalPlan }
     );
     const claudeSummary = claudeResult.output;
     const planOutput = claudeResult.planOutput || '';
@@ -629,12 +633,99 @@ async function processServiceMultiBranch(config, ticket, serviceConfig, repoUrl,
   let claudeSummary = '';
   let planOutput = '';
 
+  const allBranches = ticket.targetBranches.map(tb => tb.branch);
+  const branchCount = allBranches.length;
+  const providerLabel = getProviderLabel(config);
+
+  // ── Master plan phase ──────────────────────────────────────────────
+  // Run a single planning session across all branches, then distribute
+  // per-branch sections to each implementation pass.
+  let branchPlans = null; // Map<branchName, planText> or null if master plan failed
+
+  log(`\n  Master plan for ${serviceConfig.repo} (${branchCount} branches: ${allBranches.join(', ')})`);
+
+  let planDir = null;
+  try {
+    // 1. Clone with all branches available as remote refs
+    const planClone = await cloneForPlanning(repoUrl, allBranches);
+    planDir = planClone.tmpDir;
+
+    // 2. Inject agent rules (no-test rules for planning)
+    injectAgentRules(planDir, { ...config, AGENT_RUN_TESTS: false });
+
+    // 3. Scale budget for branch count
+    const basePlanTurns = config.CLAUDE_PLAN_TURNS || config.AGENT_PLAN_TURNS || 40;
+    const basePlanTimeoutMin = config.CLAUDE_PLAN_TIMEOUT_MINUTES || config.AGENT_PLAN_TIMEOUT_MINUTES || 30;
+    const masterPlanTurns = Math.min(basePlanTurns + (branchCount - 1) * 15, 80);
+    const masterPlanTimeout = Math.min(basePlanTimeoutMin + (branchCount - 1) * 10, 60);
+
+    log(`  Master plan budget: ${masterPlanTurns} turns, ${masterPlanTimeout} min timeout`);
+
+    // 4. Build multi-branch prompt and run Claude
+    const masterPrompt = buildMultiBranchPlanPrompt(
+      ticketKey,
+      ticket.summary,
+      ticket.description,
+      ticket.comments,
+      allBranches
+    );
+
+    const masterResult = await spawnClaude({
+      tmpDir: planDir,
+      prompt: masterPrompt,
+      maxTurns: masterPlanTurns,
+      timeout: masterPlanTimeout * 60 * 1000,
+      label: 'master-plan',
+      logDir: config.LOG_DIR,
+      ticketKey,
+      cliCommand: config.AGENT_CLI_COMMAND || 'claude',
+      providerLabel,
+    });
+
+    // 5. Validate result
+    if (masterResult.rateLimited) {
+      warn('Master plan: rate limited. All branches fall back to per-branch planning.');
+    } else if (isGarbageOutput(masterResult.output)) {
+      warn(`Master plan: garbage output (${(masterResult.output || '').length} chars). Falling back.`);
+    } else {
+      // 6. Parse per-branch sections
+      branchPlans = parseMultiBranchPlan(masterResult.output);
+      planOutput = masterResult.output;
+
+      if (branchPlans) {
+        const covered = allBranches.filter(b => branchPlans.has(b));
+        const missing = allBranches.filter(b => !branchPlans.has(b));
+        log(`  Master plan parsed successfully: ${covered.length}/${branchCount} branches covered`);
+        if (covered.length > 0) log(`    Covered: ${covered.join(', ')}`);
+        if (missing.length > 0) warn(`    Missing (will fall back): ${missing.join(', ')}`);
+      } else {
+        warn('Master plan: could not parse per-branch sections (< 2 BRANCH: headers). Falling back.');
+      }
+    }
+  } catch (masterPlanError) {
+    warn(`Master plan failed: ${masterPlanError.message}. All branches fall back to per-branch planning.`);
+  } finally {
+    if (planDir) {
+      cleanup(planDir);
+      planDir = null;
+    }
+  }
+
+  // ── Per-branch implementation ──────────────────────────────────────
   for (const branchInfo of ticket.targetBranches) {
     log(`\n  Processing ${serviceConfig.repo} / ${branchInfo.branch}`);
 
+    // Look up this branch's plan section from master plan (null = fall back to per-branch planning)
+    const branchPlan = branchPlans ? (branchPlans.get(branchInfo.branch) || null) : null;
+    if (branchPlan) {
+      log(`    Using master plan section (${branchPlan.length} chars)`);
+    } else if (branchPlans) {
+      log(`    No master plan section for this branch — using per-branch planning`);
+    }
+
     try {
       const result = await processBranch(
-        config, ticket, serviceConfig, repoUrl, ticketKey, branchInfo.branch, branchInfo.version, runCtx
+        config, ticket, serviceConfig, repoUrl, ticketKey, branchInfo.branch, branchInfo.version, runCtx, branchPlan
       );
 
       if (result.pr) {

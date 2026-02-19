@@ -17,7 +17,7 @@ const FILE_EXTENSION_PATTERN = /\b[\w\-/]+\.(js|ts|jsx|tsx|mjs|cjs|json|yaml|yml
  *
  * @param {object} ticket - Parsed ticket from parseTicket()
  * @param {object} baseConfig - Base config values (AGENT_MAX_TURNS, AGENT_PLAN_TURNS, etc.)
- * @returns {{ level: string, score: number, signals: object, recommendedMaxTurns: number, recommendedMaxContinuations: number, recommendedPlanTurns: number, enablePhases: boolean }}
+ * @returns {{ level: string, score: number, signals: object, recommendedMaxTurns: number, recommendedMaxContinuations: number, recommendedPlanTurns: number, recommendedPlanTimeoutMinutes: number, enablePhases: boolean }}
  */
 export function scoreComplexity(ticket, baseConfig = {}) {
   const signals = {};
@@ -85,28 +85,32 @@ export function scoreComplexity(ticket, baseConfig = {}) {
   }
 
   // Classification
-  let level, recommendedMaxTurns, recommendedMaxContinuations, recommendedPlanTurns, enablePhases;
+  let level, recommendedMaxTurns, recommendedMaxContinuations, recommendedPlanTurns, recommendedPlanTimeoutMinutes, enablePhases;
 
   const baseTurns = baseConfig.AGENT_MAX_TURNS || baseConfig.CLAUDE_MAX_TURNS || 75;
   const basePlanTurns = baseConfig.AGENT_PLAN_TURNS || baseConfig.CLAUDE_PLAN_TURNS || 20;
+  const basePlanTimeout = baseConfig.AGENT_PLAN_TIMEOUT_MINUTES || baseConfig.CLAUDE_PLAN_TIMEOUT_MINUTES || 30;
 
   if (score >= 8) {
     level = 'complex';
     recommendedMaxTurns = Math.max(baseTurns, 200);
     recommendedMaxContinuations = 3;
-    recommendedPlanTurns = Math.max(basePlanTurns, 30);
+    recommendedPlanTurns = Math.max(basePlanTurns, 60);
+    recommendedPlanTimeoutMinutes = Math.max(basePlanTimeout, 45);
     enablePhases = true;
   } else if (score >= 4) {
     level = 'moderate';
     recommendedMaxTurns = Math.max(baseTurns, 150);
     recommendedMaxContinuations = 1;
-    recommendedPlanTurns = Math.max(basePlanTurns, 25);
+    recommendedPlanTurns = Math.max(basePlanTurns, 50);
+    recommendedPlanTimeoutMinutes = Math.max(basePlanTimeout, 35);
     enablePhases = false;
   } else {
     level = 'simple';
     recommendedMaxTurns = baseTurns;
     recommendedMaxContinuations = 0;
     recommendedPlanTurns = basePlanTurns;
+    recommendedPlanTimeoutMinutes = basePlanTimeout;
     enablePhases = false;
   }
 
@@ -117,6 +121,7 @@ export function scoreComplexity(ticket, baseConfig = {}) {
     recommendedMaxTurns,
     recommendedMaxContinuations,
     recommendedPlanTurns,
+    recommendedPlanTimeoutMinutes,
     enablePhases,
   };
 }
