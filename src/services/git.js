@@ -118,6 +118,54 @@ export async function cloneAndBranch(config, repoUrl, baseBranch, ticketKey, tic
 }
 
 /**
+ * Create a planning-only clone with multiple branches available as remote refs.
+ * Used for multi-branch master planning — a single Claude session explores all
+ * branches via `git show origin/<branch>:<path>` and `git diff origin/A..origin/B`.
+ *
+ * @param {string} repoUrl - Repository URL (SSH)
+ * @param {string[]} branches - Array of branch names to fetch
+ * @returns {{ tmpDir: string }}
+ */
+export async function cloneForPlanning(repoUrl, branches) {
+  if (!branches || branches.length === 0) {
+    throw new Error('cloneForPlanning requires at least one branch');
+  }
+
+  if (!fs.existsSync(LOCAL_TMP_BASE)) {
+    fs.mkdirSync(LOCAL_TMP_BASE, { recursive: true });
+  }
+  const tmpDir = fs.mkdtempSync(path.join(LOCAL_TMP_BASE, 'plan-'));
+  log(`Created planning directory: ${tmpDir}`);
+
+  try {
+    // Clone with the first branch as the initial checkout
+    const primaryBranch = branches[0];
+    log(`Planning clone: ${repoUrl} (primary: ${primaryBranch})`);
+    execGit(
+      `git clone --depth=100 --branch "${primaryBranch}" "${repoUrl}" .`,
+      tmpDir,
+      CLONE_TIMEOUT
+    );
+
+    // Fetch remaining branches as remote refs (non-fatal per branch)
+    for (let i = 1; i < branches.length; i++) {
+      const branch = branches[i];
+      try {
+        log(`Fetching additional branch for planning: ${branch}`);
+        execGit(`git fetch origin "${branch}" --depth=100`, tmpDir, CLONE_TIMEOUT);
+      } catch (fetchError) {
+        warn(`Could not fetch branch ${branch} for planning: ${fetchError.message}`);
+      }
+    }
+
+    return { tmpDir };
+  } catch (error) {
+    cleanup(tmpDir);
+    throw error;
+  }
+}
+
+/**
  * Stage, commit, and push changes
  */
 export async function commitAndPush(tmpDir, featureBranch, ticketKey, ticketSummary, serviceHasInstructionFile = false, instructionFile = 'CLAUDE.md') {
@@ -200,6 +248,7 @@ export function cleanup(tmpDir) {
 
 export default {
   cloneAndBranch,
+  cloneForPlanning,
   commitAndPush,
   cleanup,
 };

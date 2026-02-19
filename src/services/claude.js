@@ -27,7 +27,7 @@ function isRateLimited(text) {
 /**
  * Check if output looks like a rate-limit or error message rather than real content.
  */
-function isGarbageOutput(text) {
+export function isGarbageOutput(text) {
   if (!text || text.trim().length === 0) return true;
   if (isRateLimited(text)) return true;
   if (text.trim().length < 50) return true; // Suspiciously short
@@ -83,7 +83,7 @@ function ensureLogDir(logDir) {
  * @param {string}  [opts.nvmBinDir] - nvm bin directory to prepend to PATH (for target Node version)
  * @returns {Promise<{output: string, completedNormally: boolean, maxTurnsReached: boolean, numTurns: number|null, exitCode: number}>}
  */
-function spawnClaude({ tmpDir, prompt, maxTurns, timeout, label, logDir, ticketKey, nvmBinDir, cliCommand = 'claude', providerLabel = 'Claude' }) {
+export function spawnClaude({ tmpDir, prompt, maxTurns, timeout, label, logDir, ticketKey, nvmBinDir, cliCommand = 'claude', providerLabel = 'Claude' }) {
   log(`[${label}] Running ${providerLabel} Code (maxTurns=${maxTurns}, timeout=${timeout / 60000}min)...`);
   log(`[${label}] Prompt length: ${prompt.length} characters`);
   debug(`[${label}] Working directory: ${tmpDir}`);
@@ -301,6 +301,36 @@ function parsePhases(planOutput) {
 }
 
 /**
+ * Parse a multi-branch master plan into per-branch sections.
+ * Looks for `### BRANCH: <name>` headers and extracts text between them.
+ *
+ * @param {string} planOutput - Raw master plan text
+ * @returns {Map<string, string>|null} Map of branch name → plan text, or null if < 2 sections found
+ */
+export function parseMultiBranchPlan(planOutput) {
+  if (!planOutput) return null;
+
+  const headerRegex = /###\s*BRANCH:\s*(.+)/gi;
+  const matches = [...planOutput.matchAll(headerRegex)];
+
+  if (matches.length < 2) return null;
+
+  const branchPlans = new Map();
+  for (let i = 0; i < matches.length; i++) {
+    const branchName = matches[i][1].trim();
+    const startIdx = matches[i].index + matches[i][0].length;
+    const endIdx = i + 1 < matches.length ? matches[i + 1].index : planOutput.length;
+    const planText = planOutput.substring(startIdx, endIdx).trim();
+
+    if (planText.length > 0) {
+      branchPlans.set(branchName, planText);
+    }
+  }
+
+  return branchPlans.size >= 2 ? branchPlans : null;
+}
+
+/**
  * Fallback: use a lightweight Claude call to parse plan into phases.
  *
  * @param {object} commonOpts - Common spawn options (tmpDir, logDir, ticketKey)
@@ -434,16 +464,23 @@ async function runValidation(config, commonOpts, basePrompt, lastOutput, planOut
  */
 export async function runClaude(config, tmpDir, ticketKey, ticketSummary, ticketDescription, ticketComments = [], options = {}) {
   const basePrompt = buildPrompt(ticketKey, ticketSummary, ticketDescription, ticketComments);
-  const { nvmBinDir, cliCommand = 'claude', providerLabel = 'Claude' } = options;
+  const { nvmBinDir, cliCommand = 'claude', providerLabel = 'Claude', externalPlan = null } = options;
   const commonOpts = { tmpDir, logDir: config.LOG_DIR, ticketKey, nvmBinDir, cliCommand, providerLabel };
   const enablePhases = config.CLAUDE_ENABLE_PHASES || false;
   const maxContinuations = config.CLAUDE_MAX_CONTINUATIONS || 0;
 
   // ── Pass 1: Plan ──────────────────────────────────────────────────
-  log('═══ Pass 1: Plan ═══');
   let planOutput = '';
   let planOk = false;
 
+  if (externalPlan) {
+    log('═══ Pass 1: Plan (EXTERNAL — skipped) ═══');
+    planOutput = externalPlan;
+    planOk = true;
+    log(`Using external plan (${externalPlan.length} chars). Skipping plan pass.`);
+  } else {
+
+  log('═══ Pass 1: Plan ═══');
   try {
     let planPrompt = basePrompt +
       '\n\nYour task: explore the codebase and produce a detailed implementation plan for the ticket above. Do NOT make any code changes.' +
@@ -500,6 +537,8 @@ export async function runClaude(config, tmpDir, ticketKey, ticketSummary, ticket
   } catch (planError) {
     warn(`Plan pass failed: ${planError.message}. Proceeding with ticket context only.`);
   }
+
+  } // end externalPlan else
 
   // ── Phase execution (complex tickets with good plan) ──────────────
   if (enablePhases && planOk) {
@@ -674,4 +713,4 @@ export async function runClaude(config, tmpDir, ticketKey, ticketSummary, ticket
   };
 }
 
-export default { runClaude };
+export default { runClaude, spawnClaude, isGarbageOutput, parseMultiBranchPlan };
