@@ -167,6 +167,11 @@ function validateTicket(config, ticket) {
   return errors;
 }
 
+function isRateLimitFailure(failure) {
+  if (!failure?.error) return false;
+  return /rate limit|rate limited/i.test(String(failure.error));
+}
+
 /**
  * Process a single ticket through the full pipeline.
  *
@@ -368,14 +373,24 @@ export async function processTicket(config, ticketOrKey) {
 
     // Aggregate results and report
     if (allPRs.length === 0) {
-      warn('No PRs created across any service/branch');
+      const allFailuresRateLimited = allFailures.length > 0 && allFailures.every(isRateLimitFailure);
+      if (allFailuresRateLimited) {
+        warn('No PRs created: all branches were rate limited by provider');
+      } else {
+        warn('No PRs created across any service/branch');
+      }
       const logUrl = uploadLogFile(getRunLogPath());
-      const noPrMsg = logUrl
-        ? `Dr. Asthana: No PRs created. Manual implementation may be needed.\n\nRun Log: ${logUrl}`
-        : 'Dr. Asthana: No PRs created. Manual implementation may be needed.';
+      const noPrMsg = allFailuresRateLimited
+        ? (logUrl
+            ? 'Dr. Asthana: Run failed due to AI provider rate limits before implementation could start. Re-run after quota reset.\n\n' +
+              `Run Log: ${logUrl}`
+            : 'Dr. Asthana: Run failed due to AI provider rate limits before implementation could start. Re-run after quota reset.')
+        : (logUrl
+            ? `Dr. Asthana: No PRs created. Manual implementation may be needed.\n\nRun Log: ${logUrl}`
+            : 'Dr. Asthana: No PRs created. Manual implementation may be needed.');
       await postComment(ticketKey, noPrMsg);
-      finalizeRun(false, 'No PRs created');
-      return { success: false, reason: 'no_prs_created' };
+      finalizeRun(false, allFailuresRateLimited ? 'Rate limited' : 'No PRs created');
+      return { success: false, reason: allFailuresRateLimited ? 'rate_limited' : 'no_prs_created' };
     }
 
     // JIRA comment — structured ADF with PR table and summary
@@ -496,14 +511,16 @@ async function processBranch(config, ticket, serviceConfig, repoUrl, ticketKey, 
     const claudeSummary = claudeResult.output;
     const planOutput = claudeResult.planOutput || '';
 
+    if (claudeResult.rateLimited) {
+      warn(`${providerLabel} hit API rate limit on ${serviceConfig.repo}/${baseBranch}`);
+      endStep(false, `${providerLabel} rate limited`);
+      return { pr: null, error: `${providerLabel} rate limited`, rateLimited: true, claudeSummary: '', planOutput };
+    }
+
     if (!claudeSummary || claudeSummary.trim() === '') {
       warn(`${providerLabel} produced no output on ${serviceConfig.repo}/${baseBranch}`);
       endStep(false, `No output from ${providerLabel}`);
-      return { pr: null, error: `No ${providerLabel} output`, claudeSummary: '', planOutput };
-    }
-
-    if (claudeResult.rateLimited) {
-      warn(`${providerLabel} hit API rate limit on ${serviceConfig.repo}/${baseBranch}`);
+      return { pr: null, error: `No ${providerLabel} output`, rateLimited: false, claudeSummary: '', planOutput };
     }
     if (claudeResult.maxTurnsReached) {
       warn(`${providerLabel} hit max turns (${claudeResult.numTurns}) — output may be incomplete`);
@@ -560,7 +577,7 @@ async function processBranch(config, ticket, serviceConfig, repoUrl, ticketKey, 
     if (!pushed) {
       warn('No changes to commit');
       endStep(false, 'No changes');
-      return { pr: null, error: 'No changes', claudeSummary, planOutput };
+      return { pr: null, error: 'No changes', rateLimited: false, claudeSummary, planOutput };
     }
     endStep(true, 'Pushed');
 
@@ -597,7 +614,7 @@ async function processBranch(config, ticket, serviceConfig, repoUrl, ticketKey, 
 
     warn('PR creation failed');
     endStep(false, 'PR creation failed');
-    return { pr: null, error: 'PR creation failed', claudeSummary, planOutput };
+    return { pr: null, error: 'PR creation failed', rateLimited: false, claudeSummary, planOutput };
 
   } finally {
     if (tmpDir) {
@@ -615,7 +632,7 @@ async function processServiceSingleBranch(config, ticket, serviceConfig, repoUrl
   const result = await processBranch(config, ticket, serviceConfig, repoUrl, ticketKey, ticket.targetBranch, null, runCtx);
   return {
     prs: result.pr ? [result.pr] : [],
-    failures: result.error ? [{ baseBranch: ticket.targetBranch, error: result.error }] : [],
+    failures: result.error ? [{ baseBranch: ticket.targetBranch, error: result.error, rateLimited: Boolean(result.rateLimited) }] : [],
     claudeSummary: result.claudeSummary || '',
     planOutput: result.planOutput || '',
   };
@@ -731,7 +748,12 @@ async function processServiceMultiBranch(config, ticket, serviceConfig, repoUrl,
       if (result.pr) {
         prs.push(result.pr);
       } else if (result.error) {
-        failures.push({ baseBranch: branchInfo.branch, error: result.error });
+        failures.push({ baseBranch: branchInfo.branch, error: result.error, rateLimited: Boolean(result.rateLimited) });
+      }
+
+      if (result.rateLimited) {
+        warn(`Stopping remaining branches for ${serviceConfig.repo}: provider rate limit encountered on ${branchInfo.branch}`);
+        break;
       }
 
       if (result.claudeSummary && !claudeSummary) {
