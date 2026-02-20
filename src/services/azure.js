@@ -4,6 +4,7 @@
 
 import { execSync } from 'child_process';
 import { log, warn, err } from '../logger.js';
+import { summariseText } from './summariser.js';
 
 const AZ_TIMEOUT = 5 * 60 * 1000; // 5 minutes
 
@@ -28,7 +29,16 @@ ${config.JIRA_BASE_URL}/browse/${ticketKey}
  * Create a PR on Azure DevOps
  */
 export async function createPR(config, tmpDir, sourceBranch, targetBranch, ticketKey, ticketSummary, claudeSummary) {
-  const title = `[${ticketKey}] ${ticketSummary}`.substring(0, 200); // Limit title length
+  const prefix = `[${ticketKey}] `;
+  const maxSummaryChars = Math.max(20, 200 - prefix.length);
+  const summarisedTitle = summariseText(ticketSummary || '', {
+    mode: 'pr-title',
+    maxChars: maxSummaryChars,
+    style: 'concise',
+    extra: 'Keep the actionable technical scope and relevant version identifiers.',
+    label: 'pr-title',
+  });
+  const title = `${prefix}${summarisedTitle}`;
   const description = buildPRDescription(config, ticketKey, ticketSummary, claudeSummary);
 
   // Extract repo name from the git remote in tmpDir
