@@ -26,6 +26,7 @@ src/
     ai-provider.js      — provider dispatcher (`claude`)
     claude.js           — three-pass execution engine (plan -> implement -> validate), stream-json parsing, rate-limit handling
     prompt-builder.js   — ticket context prompt only (key, title, description, comments)
+    summariser.js       — shared `aisum` wrapper for length-constrained summaries (JIRA/Slack/PR-safe with fallback)
     git.js              — clone, branch, commit, push, cleanup; restores CLAUDE.md before committing
     base-tagger.js      — base image tag creation (auto-detected from Dockerfile)
     test-runner.js      — test detection (CLAUDE.md / package.json), execution, shouldRunTests change analysis
@@ -102,6 +103,7 @@ cp config.example.json config.json  # then fill in your values
 ```
 
 Ensure `az` CLI is authenticated for Azure DevOps and `claude` CLI is available on PATH.
+For adaptive length-safe summaries, ensure `aisum` is installed on PATH (or keep the local fallback repo at `/Users/vaibhavpratihar/Desktop/ai-summariser`).
 
 ## Running
 
@@ -115,3 +117,9 @@ npm run single -- JCP-123
 # Dry run — show what would be processed without making changes
 npm run dry-run
 ```
+
+## Length Handling (No Blind Truncation)
+
+- User-facing long texts are summarized with `src/services/summariser.js` using the `aisum` CLI.
+- This is used for JIRA comments, Slack messages, test error snippets, lead-review plan excerpts, and PR titles.
+- If summarisation is unavailable/fails, the agent falls back to hard truncation only as a safety net to preserve platform limits.

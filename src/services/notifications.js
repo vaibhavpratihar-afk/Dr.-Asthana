@@ -8,15 +8,7 @@
 
 import { execSync } from 'child_process';
 import { log, warn, err } from '../logger.js';
-
-/**
- * Truncate text to a maximum length
- */
-function truncate(text, maxLength) {
-  if (!text) return '';
-  if (text.length <= maxLength) return text;
-  return text.substring(0, maxLength) + '...';
-}
+import { summariseText } from './summariser.js';
 
 
 /**
@@ -47,7 +39,7 @@ export function uploadLogFile(logFilePath) {
  * Build PR description including Claude's summary and test results
  */
 export function buildPRDescription(claudeSummary, testResults) {
-  let description = claudeSummary;
+  let description = claudeSummary || '';
 
   if (!testResults.skipped) {
     description += '\n\n## Test Results\n';
@@ -59,7 +51,14 @@ export function buildPRDescription(claudeSummary, testResults) {
         const status = result.success ? '✓' : '✗';
         description += `- ${status} ${result.name}\n`;
         if (!result.success && result.error) {
-          description += '```\n' + result.error.substring(0, 500) + '\n```\n';
+          const errorSummary = summariseText(result.error, {
+            mode: 'custom',
+            maxChars: 1200,
+            style: 'concise',
+            extra: 'Preserve the key failing assertion, stack frame, file path, and line number.',
+            label: `test-error:${result.name}`,
+          });
+          description += `\`\`\`\n${errorSummary}\n\`\`\`\n`;
         }
       }
     }
@@ -94,7 +93,14 @@ export function buildJiraComment(config, allPRs, allFailures, claudeSummary, log
   // Summary from Claude
   if (claudeSummary) {
     const summaryMatch = claudeSummary.match(/\*\*SUMMARY:\*\*\s*([\s\S]*?)(?=\n\*\*|$)/i);
-    const briefSummary = summaryMatch ? summaryMatch[1].trim() : claudeSummary.substring(0, 300);
+    const rawSummary = summaryMatch ? summaryMatch[1].trim() : claudeSummary;
+    const briefSummary = summariseText(rawSummary, {
+      mode: 'jira-comment',
+      maxChars: 1500,
+      style: 'detailed',
+      extra: 'Retain concrete implementation details and key caveats.',
+      label: 'jira-comment-summary',
+    });
     lines.push(`**What was done:** ${briefSummary}`);
     lines.push('');
   }
@@ -132,7 +138,14 @@ export function buildInProgressComment(config, ticket) {
   lines.push('');
 
   if (ticket.description && ticket.description !== 'No description provided') {
-    lines.push(`**Description:** ${truncate(ticket.description, 500)}`);
+    const descriptionSummary = summariseText(ticket.description, {
+      mode: 'jira-comment',
+      maxChars: 2000,
+      style: 'detailed',
+      extra: 'Keep acceptance criteria, version constraints, and explicit do/dont rules.',
+      label: 'in-progress-description',
+    });
+    lines.push(`**Description:** ${descriptionSummary}`);
     lines.push('');
   }
 
@@ -174,7 +187,13 @@ export function buildLeadReviewComment(config, allPRs, claudeSummary, planOutput
   if (planOutput) {
     lines.push('#### Implementation Plan');
     lines.push('');
-    lines.push(truncate(planOutput, 1500));
+    lines.push(summariseText(planOutput, {
+      mode: 'jira-comment',
+      maxChars: 8000,
+      style: 'detailed',
+      extra: 'Preserve phase order, file paths, and execution dependencies.',
+      label: 'lead-review-plan',
+    }));
     lines.push('');
   }
 
@@ -239,7 +258,14 @@ export async function notifyAllPRs(config, ticketKey, ticketSummary, allPRs, all
     let briefSummary = '';
     if (claudeSummary) {
       const summaryMatch = claudeSummary.match(/\*\*SUMMARY:\*\*\s*([\s\S]*?)(?=\n\*\*|$)/i);
-      briefSummary = summaryMatch ? summaryMatch[1].trim() : claudeSummary.substring(0, 200);
+      const rawSummary = summaryMatch ? summaryMatch[1].trim() : claudeSummary;
+      briefSummary = summariseText(rawSummary, {
+        mode: 'slack-message',
+        maxChars: 1800,
+        style: 'balanced',
+        extra: 'Keep concrete outcomes and reviewer-relevant risk notes.',
+        label: 'slack-brief-summary',
+      });
     }
 
     const blocks = [
@@ -339,7 +365,13 @@ export async function notifyFailure(config, ticketKey, ticketSummary, errorMessa
         type: 'section',
         text: {
           type: 'mrkdwn',
-          text: `*Error:*\n\`\`\`${truncate(errorMessage, 300)}\`\`\``,
+          text: `*Error:*\n\`\`\`${summariseText(errorMessage, {
+            mode: 'slack-message',
+            maxChars: 1200,
+            style: 'concise',
+            extra: 'Preserve error type, root cause hint, and any quota/reset details.',
+            label: 'slack-failure-error',
+          })}\`\`\``,
         },
       },
       ...(logUrl ? [{

@@ -44,6 +44,7 @@ src/
   services/
     claude.js           — three-pass Claude invocation (plan -> implement -> validate), stream-json parsing, rate-limit handling
     prompt-builder.js   — ticket context prompt + multi-branch master planning prompt
+    summariser.js       — shared `aisum` wrapper for detail-preserving, length-safe summaries (JIRA/Slack/PR)
     git.js              — clone, branch, commit, push, cleanup, planning clone; restores CLAUDE.md before committing
     base-tagger.js      — base image tag creation (auto-detected from Dockerfile)
     test-runner.js      — test detection (CLAUDE.md / package.json), execution, shouldRunTests change analysis
@@ -134,6 +135,7 @@ All JIRA write and query operations are routed through `jira-cli.mjs` via `jira-
 - **Slack:** DM to configured user with all PR links, ticket link, summary, and failure warnings.
 - **Failure:** Both JIRA comment and Slack DM on error, with error message.
 - **Run Log:** After each run, the log file is uploaded to Pixelbin CDN via `uploadLogFile()`. The CDN URL is included in JIRA comments and Slack DMs (success, failure, and no-PRs paths). Upload failures are non-blocking.
+- **Length limits:** User-facing long text is summarized via `services/summariser.js` (`aisum`) instead of direct substring truncation. Hard truncation is only used as a fallback when summarisation is unavailable.
 
 ## Azure DevOps PR Creation
 - PRs created via `az repos pr create` with org/project from config.

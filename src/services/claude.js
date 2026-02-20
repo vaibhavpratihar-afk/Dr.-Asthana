@@ -15,6 +15,7 @@ import fs from 'fs';
 import path from 'path';
 import { log, warn, debug, logData } from '../logger.js';
 import { buildPrompt } from './prompt-builder.js';
+import { summariseText } from './summariser.js';
 
 /**
  * Check if output contains a Claude API rate-limit message.
@@ -339,10 +340,18 @@ export function parseMultiBranchPlan(planOutput) {
  */
 async function parsePhasesWithClaude(commonOpts, planOutput) {
   try {
+    const compressedPlan = summariseText(planOutput || '', {
+      mode: 'custom',
+      maxChars: 8000,
+      style: 'detailed',
+      extra: 'Preserve phase headers, file paths, ordered steps, and explicit dependencies.',
+      label: 'phase-parse-plan',
+    });
+
     const parsePrompt =
       'Parse the following implementation plan into ordered phases. ' +
       'Return ONLY valid JSON, no other text: [{\"title\": \"...\", \"description\": \"...\", \"files\": [\"...\"]}]\n\n' +
-      planOutput.substring(0, 8000); // Limit to avoid excessive tokens
+      compressedPlan;
 
     const result = await spawnClaude({
       ...commonOpts,
@@ -386,12 +395,21 @@ async function parsePhasesWithClaude(commonOpts, planOutput) {
 async function runContinuation(config, commonOpts, basePrompt, previousResult, label) {
   const continuationTurns = config.CLAUDE_CONTINUATION_TURNS || config.CLAUDE_MAX_TURNS;
   const continuationTimeout = (config.CLAUDE_CONTINUATION_TIMEOUT_MINUTES || config.CLAUDE_TIMEOUT_MINUTES || 30) * 60 * 1000;
+  const continuationSummary = previousResult.output
+    ? summariseText(previousResult.output, {
+        mode: 'custom',
+        maxChars: 2000,
+        style: 'detailed',
+        extra: 'Preserve completed work, pending tasks, explicit blockers, and test failures.',
+        label: `continuation-summary:${label}`,
+      })
+    : '';
 
   const continuationPrompt = basePrompt +
     '\n\nA previous implementation pass ran out of turns. ' +
     'Review current state (git diff, modified files), then CONTINUE implementing remaining changes. ' +
     'Do NOT redo completed work.' +
-    (previousResult.output ? '\n\n## Last Pass Summary\n' + previousResult.output.substring(0, 2000) : '');
+    (continuationSummary ? '\n\n## Last Pass Summary\n' + continuationSummary : '');
 
   try {
     const result = await spawnClaude({
