@@ -1,22 +1,19 @@
 /**
- * JIRA CLI Operations
+ * JIRA CLI Operations via jira-cli.mjs
  *
- * Uses jira-cli.mjs for transitions and comments. The CLI handles:
- *   - REST API first (fast path)
- *   - Automatic browser fallback for hasScreen transitions (Dev Testing, etc.)
- *   - QC Report validators, attachment fields, etc.
- *   - Markdown → ADF conversion for comments
+ * Uses jira-cli.mjs for transitions, comments, labels, search.
+ * CLI location: skills/jira/scripts/jira-cli.mjs (or JIRA_CLI_DIR env var)
  */
 
 import { spawn } from 'child_process';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
-import { log, warn, debug } from '../logger.js';
+import { log, warn, debug } from '../utils/logger.js';
 
-const JIRA_CREATOR_DIR = process.env.JIRA_CREATOR_DIR || path.join(os.homedir(), 'Desktop', 'jira-creator');
-const TRANSITION_TIMEOUT = 2 * 60 * 1000; // 2 minutes per transition
-const COMMENT_TIMEOUT = 60 * 1000; // 1 minute for comments
+const JIRA_CLI_DIR = process.env.JIRA_CLI_DIR || path.join(os.homedir(), 'Desktop', 'skills', 'jira', 'scripts');
+const TRANSITION_TIMEOUT = 2 * 60 * 1000;
+const COMMENT_TIMEOUT = 60 * 1000;
 
 /**
  * Generic runner for jira-cli.mjs commands.
@@ -31,7 +28,7 @@ async function runJiraCli(args, label, timeoutMs = COMMENT_TIMEOUT) {
       let stderr = '';
 
       const proc = spawn('node', ['jira-cli.mjs', ...args], {
-        cwd: JIRA_CREATOR_DIR,
+        cwd: JIRA_CLI_DIR,
         env: { ...process.env },
         stdio: ['pipe', 'pipe', 'pipe'],
       });
@@ -80,50 +77,25 @@ async function runJiraCli(args, label, timeoutMs = COMMENT_TIMEOUT) {
   }
 }
 
-/**
- * Run a JIRA transition via jira-cli.mjs.
- * Thin wrapper around runJiraCli for transitions.
- */
 function runJiraCliTransition(ticketKey, transitionName, label) {
   return runJiraCli(['transition', ticketKey, transitionName], label, TRANSITION_TIMEOUT);
 }
 
-/**
- * Transition ticket to In-Progress (via "Dev Started") using jira-cli.mjs.
- *
- * @param {object} config - Configuration object (unused, kept for interface compat)
- * @param {string} ticketKey - e.g. "JCP-1234"
- * @returns {Promise<boolean>} true if transitioned successfully
- */
 export async function transitionToInProgress(config, ticketKey) {
   log(`Transitioning ${ticketKey} to In-Progress (Dev Started)...`);
-
   const result = await runJiraCliTransition(ticketKey, 'Dev Started', `in-progress-${ticketKey}`);
-
   if (result.success) {
     log(`${ticketKey} transitioned to In-Progress`);
     return true;
   }
-
   warn(`Could not transition ${ticketKey} to In-Progress`);
   return false;
 }
 
-/**
- * Transition ticket to LEAD REVIEW via two steps:
- *   Step 1: Dev Testing (jira-cli.mjs handles browser fallback automatically)
- *   Step 2: EM Review (jira-cli.mjs handles API call)
- *
- * @param {object} config - Configuration object (unused, kept for interface compat)
- * @param {string} ticketKey - e.g. "JCP-1234"
- * @returns {Promise<{devTestingDone: boolean, emReviewDone: boolean}>}
- */
 export async function transitionToLeadReview(config, ticketKey) {
-  log(`Transitioning ${ticketKey} to LEAD REVIEW (Dev Testing → EM Review)...`);
+  log(`Transitioning ${ticketKey} to LEAD REVIEW (Dev Testing -> EM Review)...`);
 
-  // Step 1: Dev Testing
   const devResult = await runJiraCliTransition(ticketKey, 'Dev Testing', `dev-testing-${ticketKey}`);
-
   if (!devResult.success) {
     warn(`Dev Testing transition failed for ${ticketKey} — skipping EM Review`);
     return { devTestingDone: false, emReviewDone: false };
@@ -132,9 +104,7 @@ export async function transitionToLeadReview(config, ticketKey) {
   log(`${ticketKey} Dev Testing done, waiting 3s for JIRA to process...`);
   await new Promise(resolve => setTimeout(resolve, 3000));
 
-  // Step 2: EM Review
   const emResult = await runJiraCliTransition(ticketKey, 'EM Review', `em-review-${ticketKey}`);
-
   if (!emResult.success) {
     warn(`EM Review transition failed for ${ticketKey}`);
     return { devTestingDone: true, emReviewDone: false };
@@ -146,13 +116,7 @@ export async function transitionToLeadReview(config, ticketKey) {
 
 /**
  * Search JIRA tickets via jira-cli.mjs search command.
- * Unlike other CLI wrappers, this THROWS on failure — callers (daemon, dry-run)
- * depend on error propagation for control flow.
- *
- * @param {string} jql - JQL query string
- * @param {number} maxResults - Maximum number of results
- * @param {string[]} fields - Fields to return
- * @returns {Promise<object[]>} Array of issue objects
+ * THROWS on failure.
  */
 export async function searchTickets(jql, maxResults, fields) {
   const result = await runJiraCli(
@@ -169,14 +133,6 @@ export async function searchTickets(jql, maxResults, fields) {
   return data.issues || [];
 }
 
-/**
- * Add a label to a JIRA ticket via jira-cli.mjs.
- * Non-blocking: never throws, return value is always discarded by callers.
- *
- * @param {string} ticketKey - e.g. "JCP-1234"
- * @param {string} label - Label to add
- * @returns {Promise<boolean>} true if added successfully
- */
 export async function addLabel(ticketKey, label) {
   const result = await runJiraCli(
     ['label', 'add', ticketKey, label],
@@ -185,14 +141,6 @@ export async function addLabel(ticketKey, label) {
   return result.success;
 }
 
-/**
- * Remove a label from a JIRA ticket via jira-cli.mjs.
- * Non-blocking: never throws, return value is always discarded by callers.
- *
- * @param {string} ticketKey - e.g. "JCP-1234"
- * @param {string} label - Label to remove
- * @returns {Promise<boolean>} true if removed successfully
- */
 export async function removeLabel(ticketKey, label) {
   const result = await runJiraCli(
     ['label', 'remove', ticketKey, label],
@@ -203,12 +151,7 @@ export async function removeLabel(ticketKey, label) {
 
 /**
  * Post a Markdown comment to a JIRA ticket via jira-cli.mjs.
- * Writes markdown to a temp file, passes it with --file flag.
- * Non-blocking: catches all errors, logs warnings, never throws.
- *
- * @param {string} ticketKey - e.g. "JCP-1234"
- * @param {string} markdownText - Comment body in Markdown
- * @returns {Promise<boolean>} true if posted successfully
+ * Uses --file flag with temp markdown file + --auto-summarize.
  */
 export async function postComment(ticketKey, markdownText) {
   const tmpFile = path.join(os.tmpdir(), `jira-comment-${ticketKey}-${Date.now()}.md`);
@@ -217,7 +160,7 @@ export async function postComment(ticketKey, markdownText) {
     await fs.writeFile(tmpFile, markdownText, 'utf-8');
 
     const result = await runJiraCli(
-      ['comment', 'add', ticketKey, '--file', tmpFile],
+      ['comment', 'add', ticketKey, '--file', tmpFile, '--auto-summarize'],
       `comment-${ticketKey}`,
       COMMENT_TIMEOUT
     );
@@ -229,6 +172,6 @@ export async function postComment(ticketKey, markdownText) {
   } finally {
     try {
       await fs.unlink(tmpFile);
-    } catch { /* temp file cleanup is best-effort */ }
+    } catch { /* best-effort cleanup */ }
   }
 }

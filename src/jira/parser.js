@@ -1,9 +1,10 @@
 /**
- * Ticket data extraction and parsing
+ * Ticket data extraction from raw JIRA responses.
+ * Full ADF-to-markdown conversion.
  */
 
 /**
- * Apply ADF text marks (bold, italic, code, strikethrough, link) as markdown syntax.
+ * Apply ADF text marks as markdown syntax.
  */
 function applyMarks(text, marks) {
   if (!marks || !Array.isArray(marks) || marks.length === 0) {
@@ -115,33 +116,18 @@ function extractTextFromADF(content) {
   return textParts.join('').trim();
 }
 
-/**
- * Extract description from ticket
- */
 export function extractDescription(ticket) {
   const description = ticket.fields?.description;
-
-  if (!description) {
-    return 'No description provided';
-  }
-
-  if (typeof description === 'string') {
-    return description;
-  }
-
+  if (!description) return 'No description provided';
+  if (typeof description === 'string') return description;
   if (description.type === 'doc' && description.content) {
     return extractTextFromADF(description.content);
   }
-
   return 'No description provided';
 }
 
-/**
- * Extract comments from ticket
- */
 export function extractComments(ticket) {
   const comments = ticket.fields?.comment?.comments || [];
-
   return comments.map((comment) => {
     let text = '';
     if (comment.body?.content) {
@@ -149,7 +135,6 @@ export function extractComments(ticket) {
     } else if (typeof comment.body === 'string') {
       text = comment.body;
     }
-
     return {
       author: comment.author?.displayName || 'Unknown',
       text,
@@ -158,53 +143,24 @@ export function extractComments(ticket) {
   });
 }
 
-/**
- * Extract affected systems from ticket
- */
 export function extractAffectedSystems(config, ticket) {
-  const field = config.JIRA_FIELDS.affectedSystems;
+  const field = config.jira.fields.affectedSystems;
   const affectedSystems = ticket.fields?.[field];
-
-  if (!affectedSystems || !Array.isArray(affectedSystems)) {
-    return [];
-  }
-
-  return affectedSystems.map((system) => system.value || system.name || system).filter(Boolean);
+  if (!affectedSystems || !Array.isArray(affectedSystems)) return [];
+  return affectedSystems.map((s) => s.value || s.name || s).filter(Boolean);
 }
 
-/**
- * Extract fix version and convert to branch name
- * "Fynd Platform v1.10.7" → "version/1.10.7"
- */
 export function extractBranchFromFixVersion(ticket) {
   const fixVersions = ticket.fields?.fixVersions;
-
-  if (!fixVersions || !Array.isArray(fixVersions) || fixVersions.length === 0) {
-    return null;
-  }
-
-  const fixVersion = fixVersions[0];
-  const versionName = fixVersion.name || fixVersion;
-
+  if (!fixVersions || !Array.isArray(fixVersions) || fixVersions.length === 0) return null;
+  const versionName = fixVersions[0].name || fixVersions[0];
   const match = versionName.match(/v?(\d+\.\d+\.\d+)/i);
-  if (!match) {
-    return null;
-  }
-
-  return `version/${match[1]}`;
+  return match ? `version/${match[1]}` : null;
 }
 
-/**
- * Extract all fix versions as branch targets
- * Returns array of { branch, versionName, version } for every parseable fix version
- */
 export function extractAllBranches(ticket) {
   const fixVersions = ticket.fields?.fixVersions;
-
-  if (!fixVersions || !Array.isArray(fixVersions) || fixVersions.length === 0) {
-    return [];
-  }
-
+  if (!fixVersions || !Array.isArray(fixVersions) || fixVersions.length === 0) return [];
   return fixVersions
     .map((fv) => {
       const versionName = fv.name || fv;
@@ -215,22 +171,12 @@ export function extractAllBranches(ticket) {
     .filter(Boolean);
 }
 
-/**
- * Get raw fix version name from ticket
- */
 export function getFixVersionName(ticket) {
   const fixVersions = ticket.fields?.fixVersions;
-
-  if (!fixVersions || !Array.isArray(fixVersions) || fixVersions.length === 0) {
-    return null;
-  }
-
+  if (!fixVersions || !Array.isArray(fixVersions) || fixVersions.length === 0) return null;
   return fixVersions[0].name || fixVersions[0];
 }
 
-/**
- * Parse a ticket into a structured format with all required fields
- */
 export function parseTicket(config, ticket) {
   return {
     key: ticket.key,
@@ -248,16 +194,10 @@ export function parseTicket(config, ticket) {
   };
 }
 
-/**
- * Display ticket details in logs
- */
-export function displayTicketDetails(ticket, logger) {
-  const { log } = logger;
-
+export function displayTicketDetails(ticket, loggerInstance) {
+  const { log } = loggerInstance;
   log('');
-  log('╔════════════════════════════════════════════════════════════╗');
-  log('║                     TICKET DETAILS                         ║');
-  log('╚════════════════════════════════════════════════════════════╝');
+  log('== TICKET DETAILS ==');
   log('');
   log(`Key:              ${ticket.key}`);
   log(`Title:            ${ticket.summary}`);
@@ -272,31 +212,7 @@ export function displayTicketDetails(ticket, logger) {
     log(`Target Branches:  ${ticket.targetBranches.map(tb => tb.branch).join(', ')}`);
   }
   log('');
-  log('┌─── DESCRIPTION ─────────────────────────────────────────────');
-  log(ticket.description || 'No description');
-  log('└──────────────────────────────────────────────────────────────');
-  log('');
-  log('┌─── COMMENTS ─────────────────────────────────────────────────');
-  if (ticket.comments.length === 0) {
-    log('No comments');
-  } else {
-    ticket.comments.forEach((comment, i) => {
-      log(`[${i + 1}] ${comment.author}:`);
-      log(comment.text);
-      log('');
-    });
-  }
-  log('└──────────────────────────────────────────────────────────────');
+  log(`Description: ${(ticket.description || 'No description').substring(0, 200)}...`);
+  log(`Comments: ${ticket.comments.length}`);
   log('');
 }
-
-export default {
-  extractDescription,
-  extractComments,
-  extractAffectedSystems,
-  extractBranchFromFixVersion,
-  extractAllBranches,
-  getFixVersionName,
-  parseTicket,
-  displayTicketDetails,
-};
