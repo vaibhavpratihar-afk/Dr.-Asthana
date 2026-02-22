@@ -33,20 +33,14 @@ export async function buildCheatsheet(ticketData, cloneDir, config, options = {}
   log('Building codebase context...');
   const codebaseContext = buildCodebaseContext(cloneDir);
 
-  // 3. Early rejection gate — basic validation
-  const earlyReject = earlyRejectionGate(ticketData);
-  if (earlyReject) {
-    return { status: 'rejected', reason: earlyReject, phase: 'early' };
-  }
-
-  // 4. Run debate
+  // 3. Run debate
   log('Starting debate...');
   const debateResult = await runDebate(ticketContext, codebaseContext, cloneDir, config, {
     checkpointDir,
     ticketKey,
   });
 
-  // 5. Evaluate (late rejection gate)
+  // 4. Evaluate (late rejection gate)
   if (!debateResult.passed || !debateResult.cheatsheet) {
     return {
       status: 'rejected',
@@ -62,33 +56,6 @@ export async function buildCheatsheet(ticketData, cloneDir, config, options = {}
     cheatsheet: debateResult.cheatsheet,
     summary: `Debate completed in ${debateResult.rounds} round(s)`,
   };
-}
-
-/**
- * Early rejection gate — validates ticket has minimum viable data.
- * Returns rejection reason string, or null if passed.
- */
-function earlyRejectionGate(ticketData) {
-  if (!ticketData.summary || ticketData.summary === 'No summary') {
-    return 'Ticket has no summary';
-  }
-
-  if (!ticketData.description || ticketData.description === 'No description provided') {
-    // Not a hard reject — some tickets rely on comments
-    if (!ticketData.comments || ticketData.comments.length === 0) {
-      return 'Ticket has no description and no comments';
-    }
-  }
-
-  if (!ticketData.affectedSystems || ticketData.affectedSystems.length === 0) {
-    return 'No Affected Systems specified';
-  }
-
-  if (!ticketData.targetBranch) {
-    return 'No Fix Version specified';
-  }
-
-  return null;
 }
 
 export { validateExecution } from './validator.js';

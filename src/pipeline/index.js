@@ -4,10 +4,12 @@
  * Knows about all modules. Runs steps in sequence.
  * Each step: log start → post JIRA step comment → execute → save checkpoint → handle result.
  *
- * Steps 1-2 run once. Steps 3-7 loop for each (service, branch) combo. Step 8 runs once at end.
+ * Steps 1-2 run once. Steps 3-7 process a single service/branch. Step 8 runs once at end.
  */
 
-import { getTicketDetails, parseTicket, displayTicketDetails } from '../jira/index.js';
+import fs from 'fs';
+import path from 'path';
+import { getTicketDetails, parseTicket, displayTicketDetails, validateTicket } from '../jira/index.js';
 import { transitionToInProgress, transitionToLeadReview, postComment, addLabel, removeLabel } from '../jira/index.js';
 import { getServiceConfig, getRepoUrl } from '../utils/config.js';
 import { cloneAndBranch, commitAndPush, cleanup } from '../service/index.js';
@@ -82,47 +84,41 @@ export async function runPipeline(config, ticketOrKey) {
       warn(`In-Progress transition failed (non-blocking): ${e.message}`);
     }
 
-    // ══════ Steps 3-7: Loop per (service, branch) ══════
-    const allPRs = [];
-    const allFailures = [];
-    let firstCheatsheetSummary = '';
+    // ══════ Steps 3-7: Single service, single branch ══════
+    const serviceName = ticket.affectedSystems[0];
+    const serviceConfig = getServiceConfig(config, serviceName);
+    const repoUrl = getRepoUrl(config, serviceName);
+    const baseBranch = ticket.targetBranch;
+    const version = ticket.targetBranches?.[0]?.version || null;
 
-    for (const serviceName of ticket.affectedSystems) {
-      const serviceConfig = getServiceConfig(config, serviceName);
-      if (!serviceConfig) {
-        allFailures.push({ service: serviceName, baseBranch: 'all', error: `Unknown service: ${serviceName}` });
-        continue;
+    let pr = null;
+    let failure = null;
+    let cheatsheetSummary = '';
+
+    log(`\n--- Processing ${serviceName} / ${baseBranch} ---`);
+
+    try {
+      const result = await processServiceBranch(
+        config, ticket, serviceConfig, repoUrl, ticketKey,
+        baseBranch, version, runCtx
+      );
+
+      if (result.pr) {
+        pr = { service: serviceName, ...result.pr };
+      } else if (result.error) {
+        failure = { service: serviceName, baseBranch, error: result.error };
       }
 
-      const repoUrl = getRepoUrl(config, serviceName);
-      const branches = ticket.targetBranches && ticket.targetBranches.length > 0
-        ? ticket.targetBranches
-        : [{ branch: ticket.targetBranch, versionName: ticket.fixVersion, version: null }];
-
-      for (const branchInfo of branches) {
-        log(`\n--- Processing ${serviceName} / ${branchInfo.branch} ---`);
-
-        try {
-          const result = await processServiceBranch(
-            config, ticket, serviceConfig, repoUrl, ticketKey,
-            branchInfo.branch, branchInfo.version, runCtx
-          );
-
-          if (result.pr) {
-            allPRs.push({ service: serviceName, ...result.pr });
-          } else if (result.error) {
-            allFailures.push({ service: serviceName, baseBranch: branchInfo.branch, error: result.error });
-          }
-
-          if (result.cheatsheetSummary && !firstCheatsheetSummary) {
-            firstCheatsheetSummary = result.cheatsheetSummary;
-          }
-        } catch (branchError) {
-          err(`Failed to process ${serviceName}/${branchInfo.branch}: ${branchError.message}`);
-          allFailures.push({ service: serviceName, baseBranch: branchInfo.branch, error: branchError.message });
-        }
+      if (result.cheatsheetSummary) {
+        cheatsheetSummary = result.cheatsheetSummary;
       }
+    } catch (branchError) {
+      err(`Failed to process ${serviceName}/${baseBranch}: ${branchError.message}`);
+      failure = { service: serviceName, baseBranch, error: branchError.message };
     }
+
+    const allPRs = pr ? [pr] : [];
+    const allFailures = failure ? [failure] : [];
 
     // ══════ Step 8: NOTIFY ══════
     startStep(8, 'Update JIRA and send notifications');
@@ -143,31 +139,25 @@ export async function runPipeline(config, ticketOrKey) {
     try {
       const transitionResult = await transitionToLeadReview(config, ticketKey);
       if (transitionResult.emReviewDone) {
-        await postLeadReviewComment(config, ticketKey, allPRs, firstCheatsheetSummary);
+        await postLeadReviewComment(config, ticketKey, allPRs, cheatsheetSummary);
       }
     } catch (e) {
       warn(`LEAD REVIEW transition failed (non-blocking): ${e.message}`);
     }
 
     // Post final JIRA comment
-    await postFinalJiraReport(config, ticketKey, allPRs, allFailures, firstCheatsheetSummary, logUrl);
+    await postFinalJiraReport(config, ticketKey, allPRs, allFailures, cheatsheetSummary, logUrl);
 
     // Update labels
     await removeLabel(ticketKey, config.jira.label);
-    const addedLabels = new Set();
-    for (const pr of allPRs) {
-      const versionMatch = pr.baseBranch.match(/version\/(.+)/);
-      const processedLabel = versionMatch
-        ? `${config.jira.labelProcessed}-${versionMatch[1]}`
-        : config.jira.labelProcessed;
-      if (!addedLabels.has(processedLabel)) {
-        await addLabel(ticketKey, processedLabel);
-        addedLabels.add(processedLabel);
-      }
-    }
+    const versionMatch = pr.baseBranch.match(/version\/(.+)/);
+    const processedLabel = versionMatch
+      ? `${config.jira.labelProcessed}-${versionMatch[1]}`
+      : config.jira.labelProcessed;
+    await addLabel(ticketKey, processedLabel);
 
     // Slack notification
-    await notifySlackSuccess(config, ticketKey, ticket.summary, allPRs, allFailures, firstCheatsheetSummary, logUrl);
+    await notifySlackSuccess(config, ticketKey, ticket.summary, allPRs, allFailures, cheatsheetSummary, logUrl);
     endStep(true, 'JIRA comment and Slack notification sent');
 
     saveCheckpoint(ticketKey, STEPS.NOTIFY, { allPRs, allFailures });
@@ -261,6 +251,16 @@ async function processServiceBranch(config, ticket, serviceConfig, repoUrl, tick
       branchName: baseBranch,
     });
     endStep(true, `Branch created: ${featureBranch}`);
+
+    // Guard: reject services that use npm instead of pnpm
+    const hasPnpmLock = fs.existsSync(path.join(tmpDir, 'pnpm-lock.yaml'));
+    const hasNpmLock = fs.existsSync(path.join(tmpDir, 'package-lock.json'));
+    if (!hasPnpmLock && hasNpmLock) {
+      const reason = `Service ${serviceConfig.repo} uses npm (package-lock.json found, no pnpm-lock.yaml). Only pnpm services are supported.`;
+      warn(reason);
+      endStep(false, reason);
+      return { pr: null, error: reason, cheatsheetSummary: '' };
+    }
 
     // Step 4: BUILD_CHEATSHEET
     startStep(4, `Build cheatsheet for ${serviceConfig.repo}/${baseBranch}`);
@@ -377,26 +377,3 @@ async function processServiceBranch(config, ticket, serviceConfig, repoUrl, tick
   }
 }
 
-/**
- * Validate ticket has required fields for processing.
- */
-function validateTicket(config, ticket) {
-  const errors = [];
-
-  if (ticket.affectedSystems.length === 0) {
-    errors.push('No Affected Systems specified');
-  }
-
-  if (!ticket.targetBranch) {
-    errors.push('No Fix Version specified');
-  }
-
-  for (const system of ticket.affectedSystems) {
-    const serviceConfig = getServiceConfig(config, system);
-    if (!serviceConfig) {
-      errors.push(`Unknown service: ${system}. Supported: ${Object.keys(config.services).join(', ')}`);
-    }
-  }
-
-  return errors;
-}

@@ -17,3 +17,6 @@ export {
   addLabel,
   removeLabel,
 } from './transitions.js';
+export {
+  validateTicket,
+} from './validator.js';
