@@ -74,6 +74,10 @@
         "maxTurns": 5,
         "timeoutMinutes": 5,
         "allowedTools": "Read,Glob,Grep"
+      },
+      "codex": {
+        "model": null,
+        "timeoutMinutes": 5
       }
     }
   },

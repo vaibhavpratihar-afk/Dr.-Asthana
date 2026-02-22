@@ -116,6 +116,10 @@ export function loadConfig() {
           timeoutMinutes: raw.aiProvider?.evaluate?.claude?.timeoutMinutes || 5,
           allowedTools: raw.aiProvider?.evaluate?.claude?.allowedTools || 'Read,Glob,Grep',
         },
+        codex: {
+          model: raw.aiProvider?.evaluate?.codex?.model || null,
+          timeoutMinutes: raw.aiProvider?.evaluate?.codex?.timeoutMinutes || 5,
+        },
       },
     },
     infra: {

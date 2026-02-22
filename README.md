@@ -95,6 +95,8 @@ Edit `config.json` in the project root. See `config.example.json` for the full s
 | `infra` | enabled, scriptsDir, stopAfterProcessing |
 | `tests` | enabled |
 
+Provider can be set per mode (`execute`, `debate`, `evaluate`) to either `claude` or `codex`.
+
 ## Infrastructure (Optional)
 
 The agent can optionally start/stop local infrastructure services (MongoDB, Redis, Kafka) before running tests. Disabled by default. Set `infra.enabled: true` and point `infra.scriptsDir` to a directory containing `run_services.sh` and `stop-services.sh`.
@@ -106,7 +108,7 @@ pnpm install
 cp config.example.json config.json  # then fill in your values
 ```
 
-Ensure `az` CLI is authenticated for Azure DevOps and `claude` CLI is available on PATH.
+Ensure `az` CLI is authenticated for Azure DevOps and the configured AI CLI (`claude` and/or `codex`) is available on PATH.
 For length-safe summaries, ensure `aisum` is installed on PATH.
 
 ## Running

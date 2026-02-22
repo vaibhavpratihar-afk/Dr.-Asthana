@@ -64,7 +64,9 @@ export async function cloneAndBranch(config, repoUrl, baseBranch, ticketKey, tic
 
     // Check for existing instruction files (CLAUDE.md, CODEX.md, codex.md)
     const instructionFiles = ['CLAUDE.md', 'CODEX.md', 'codex.md'];
-    let instructionFile = 'CLAUDE.md';
+    const configuredProvider = config?.aiProvider?.execute?.provider || 'claude';
+    const preferredInstructionFile = configuredProvider === 'codex' ? 'codex.md' : 'CLAUDE.md';
+    let instructionFile = preferredInstructionFile;
     let serviceHasInstructionFile = false;
 
     for (const f of instructionFiles) {
@@ -76,11 +78,20 @@ export async function cloneAndBranch(config, repoUrl, baseBranch, ticketKey, tic
     }
 
     if (!serviceHasInstructionFile) {
-      // Copy default CLAUDE.md from project root
-      const defaultInstruction = path.join(process.cwd(), 'CLAUDE.md');
-      if (fs.existsSync(defaultInstruction)) {
-        fs.copyFileSync(defaultInstruction, path.join(tmpDir, instructionFile));
-        log(`Copied default CLAUDE.md (service has none)`);
+      // Copy default instruction file from project root
+      const fallbackInstructionFiles = [
+        preferredInstructionFile,
+        ...instructionFiles.filter(f => f !== preferredInstructionFile),
+      ];
+
+      const defaultInstruction = fallbackInstructionFiles
+        .map(f => ({ name: f, fullPath: path.join(process.cwd(), f) }))
+        .find(f => fs.existsSync(f.fullPath));
+
+      if (defaultInstruction) {
+        instructionFile = defaultInstruction.name;
+        fs.copyFileSync(defaultInstruction.fullPath, path.join(tmpDir, instructionFile));
+        log(`Copied default ${instructionFile} (service has none)`);
       }
     } else {
       log(`Service has its own ${instructionFile}`);
@@ -101,7 +112,7 @@ export async function cloneAndBranch(config, repoUrl, baseBranch, ticketKey, tic
 
 /**
  * Stage, commit, and push changes.
- * Restores CLAUDE.md/CODEX.md before committing.
+ * Restores instruction file before committing.
  */
 export async function commitAndPush(tmpDir, featureBranch, ticketKey, ticketSummary, serviceHasInstructionFile = false, instructionFile = 'CLAUDE.md') {
   execGit('git add -A', tmpDir);
