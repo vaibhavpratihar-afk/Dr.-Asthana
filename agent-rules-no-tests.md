@@ -10,14 +10,14 @@
 
 ```bash
 # CORRECT — output goes to file only
-npm install > /tmp/npm-install.log 2>&1 && echo "OK" || echo "FAIL: $(tail -5 /tmp/npm-install.log)"
-npm run build > /tmp/build.log 2>&1; echo "Exit: $?"
+pnpm install > /tmp/pnpm-install.log 2>&1 && echo "OK" || echo "FAIL: $(tail -5 /tmp/pnpm-install.log)"
+pnpm run build > /tmp/build.log 2>&1; echo "Exit: $?"
 ```
 
 Short commands (`ls`, `cat` of small files, `echo`, `node --check`) are fine without redirection.
 
 ## Testing Restriction
-- Do NOT run npm test, npm run lint, or any test/lint commands — the bot handles testing separately.
+- Do NOT run pnpm test, pnpm run lint, or any test/lint commands — the bot handles testing separately.
 
 ## CRITICAL RESTRICTIONS
 You MUST NOT do any of the following. Violation will cause the entire run to fail:
@@ -28,10 +28,10 @@ You MUST NOT do any of the following. Violation will cause the entire run to fai
 - Do NOT run docker commands (docker run, docker-compose, docker start, etc.) — test infrastructure is managed externally
 
 You ARE allowed to run:
-- npm install, npm uninstall, npm ci (dependency management is fine)
+- pnpm install, pnpm add, pnpm remove (dependency management is fine)
 - Any commands needed to implement the ticket (e.g., build scripts, code generation)
 
-Do NOT manually edit package-lock.json — always use npm commands to manage dependencies.
+Do NOT manually edit pnpm-lock.yaml or package-lock.json — always use pnpm commands to manage dependencies.
 
 ## Sub-Agent Usage
 - Use Task tool to delegate exploration of large files (>500 lines) to keep main context clean

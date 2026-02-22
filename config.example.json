@@ -1,5 +1,4 @@
 {
-  "provider": "claude",
   "jira": {
     "baseUrl": "https://your-org.atlassian.net",
     "email": "you@example.com",
@@ -32,24 +31,58 @@
   "agent": {
     "pollInterval": 300,
     "maxTicketsPerCycle": 1,
-    "logDir": "./logs"
+    "logDir": "./logs",
+    "executionRetries": 1
+  },
+  "aiProvider": {
+    "strategy": "single",
+
+    "execute": {
+      "provider": "claude",
+      "fallbackProvider": null,
+      "claude": {
+        "model": "haiku",
+        "maxTurns": 30,
+        "timeoutMinutes": 15,
+        "allowedTools": "Read,Write,Edit,Bash,Glob,Grep"
+      },
+      "codex": {
+        "model": null,
+        "timeoutMinutes": 15
+      }
+    },
+
+    "debate": {
+      "provider": "claude",
+      "maxRounds": 3,
+      "claude": {
+        "model": "sonnet",
+        "maxTurns": 15,
+        "timeoutMinutes": 10,
+        "allowedTools": "Read,Glob,Grep"
+      },
+      "codex": {
+        "model": null,
+        "timeoutMinutes": 10
+      }
+    },
+
+    "evaluate": {
+      "provider": "claude",
+      "claude": {
+        "model": "sonnet",
+        "maxTurns": 5,
+        "timeoutMinutes": 5,
+        "allowedTools": "Read,Glob,Grep"
+      }
+    }
   },
   "infra": {
-    "enabled": true,
+    "enabled": false,
     "scriptsDir": "/path/to/infra-scripts",
     "stopAfterProcessing": false
   },
-  "claude": {
-    "maxTurns": 150,
-    "planTurns": 20,
-    "validationTurns": 30,
-    "allowedTools": "Read,Write,Edit,Bash,Glob,Grep,Task",
-    "timeoutMinutes": 60,
-    "planTimeoutMinutes": 10,
-    "runTests": true,
-    "continuationTurns": 150,
-    "maxContinuations": 2,
-    "continuationTimeoutMinutes": 30,
-    "complexityScaling": true
+  "tests": {
+    "enabled": false
   }
 }

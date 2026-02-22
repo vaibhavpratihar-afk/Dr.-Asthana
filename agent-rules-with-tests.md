@@ -11,12 +11,12 @@
 
 ```bash
 # CORRECT — output goes to file only
-npm install > /tmp/npm-install.log 2>&1 && echo "OK" || echo "FAIL: $(tail -5 /tmp/npm-install.log)"
+pnpm install > /tmp/pnpm-install.log 2>&1 && echo "OK" || echo "FAIL: $(tail -5 /tmp/pnpm-install.log)"
 ./run.test.sh > /tmp/test-output.log 2>&1; echo "Exit: $?"
-npm run build > /tmp/build.log 2>&1; echo "Exit: $?"
+pnpm run build > /tmp/build.log 2>&1; echo "Exit: $?"
 
 # WRONG — do NOT do any of these:
-npm install                              # large output floods context
+pnpm install                             # large output floods context
 ./run.test.sh                            # test output floods context
 ./run.test.sh 2>&1 | tee test.log       # tee still sends to stdout
 ./run.test.sh | tail -50                 # pipe still buffers full output
@@ -38,15 +38,15 @@ Each test run takes minutes of wall-clock time. Minimize runs by analyzing log f
 1. **Discover the test command** — check these in order:
    - CLAUDE.md in the repo root (may specify a custom test command or shell script)
    - `run.test.sh` or `test.sh` in the repo root (run via `bash run.test.sh`)
-   - `npm test` as a fallback
-2. **Install dependencies first** if needed (`npm install > /tmp/npm-install.log 2>&1`).
+   - `pnpm test` as a fallback
+2. **Install dependencies first** if needed (`pnpm install > /tmp/pnpm-install.log 2>&1`).
 3. **Run tests once to a file** and check the exit code:
    ```bash
    ./run.test.sh > /tmp/test-output.log 2>&1; echo "Exit: $?"
    ```
 4. **Analyze the log file — do NOT re-run yet.**
    - `tail -80 /tmp/test-output.log` — test summary (pass/fail counts) is at the end.
-   - `grep -n "FAIL\|✗\|Error\|AssertionError" /tmp/test-output.log` — find every failure.
+   - `grep -n "FAIL\|Error\|AssertionError" /tmp/test-output.log` — find every failure.
    - `grep -B5 "FAIL" /tmp/test-output.log` — get context around failures.
    - Read specific line ranges with `sed -n '100,150p' /tmp/test-output.log` if you need more context.
    - Identify **all** failures and their root causes from this single log. Do not fix one and re-run to discover the next.
@@ -55,7 +55,7 @@ Each test run takes minutes of wall-clock time. Minimize runs by analyzing log f
 7. **If still failing:** repeat the analyze-fix-run cycle. You may run tests up to **5 times** total. If tests still fail after 5 runs, stop — note the remaining failures in your summary and move on.
 8. **Follow ticket comments** — if comments mention test isolation (e.g., `fdescribe`/`fit`), use it during debugging, but **always revert `fdescribe`/`fit` back to `describe`/`it` before finishing**.
 9. **Pre-existing failures** — if tests clearly unrelated to your changes were already failing, note them in your summary but don't get stuck trying to fix them.
-10. Do NOT run lint commands (`npm run lint`, `eslint`, etc.) — those are not required.
+10. Do NOT run lint commands (`pnpm run lint`, `eslint`, etc.) — those are not required.
 
 ## CRITICAL RESTRICTIONS
 You MUST NOT do any of the following. Violation will cause the entire run to fail:
@@ -66,10 +66,10 @@ You MUST NOT do any of the following. Violation will cause the entire run to fai
 - Do NOT run docker commands (docker run, docker-compose, docker start, etc.) — test infrastructure is managed externally
 
 You ARE allowed to run:
-- npm install, npm uninstall, npm ci (dependency management is fine)
+- pnpm install, pnpm add, pnpm remove (dependency management is fine)
 - Any commands needed to implement the ticket (e.g., build scripts, code generation)
 
-Do NOT manually edit package-lock.json — always use npm commands to manage dependencies.
+Do NOT manually edit pnpm-lock.yaml or package-lock.json — always use pnpm commands to manage dependencies.
 
 ## Sub-Agent Usage
 - Use Task tool to delegate exploration of large files (>500 lines) to keep main context clean

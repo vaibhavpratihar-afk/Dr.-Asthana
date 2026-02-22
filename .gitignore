@@ -1,8 +1,8 @@
 node_modules/
 .tmp/
+.pipeline-state/
 logs/
 *.log
-.env
 
 # Secrets / credentials
 config.json
@@ -15,3 +15,6 @@ dump.rdb
 
 # Claude local state
 .claude/
+
+# pnpm
+pnpm-debug.log*
