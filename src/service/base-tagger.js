@@ -1,20 +1,15 @@
 /**
  * Base Image Tagger
- *
- * Handles base image tag creation when dependencies change.
  * Auto-detects base image registry from each repo's Dockerfile.
  */
 
 import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import { log, warn } from '../logger.js';
+import { log, warn } from '../utils/logger.js';
 
-const CMD_TIMEOUT = 10 * 60 * 1000; // 10 minutes
+const CMD_TIMEOUT = 10 * 60 * 1000;
 
-/**
- * Execute a git command in a directory
- */
 function execGit(cmd, cwd, timeout = CMD_TIMEOUT) {
   try {
     return execSync(cmd, {
@@ -32,26 +27,8 @@ function execGit(cmd, cwd, timeout = CMD_TIMEOUT) {
 
 /**
  * Handle base tag creation when dependencies change.
- *
- * Per the service CLAUDE.md, the pipeline clones the tagged commit to build
- * the base image. Therefore, dependency changes MUST be committed and pushed
- * BEFORE this function is called. The tag is created on HEAD (the pushed
- * feature branch commit that contains the dependency changes).
- *
- * 1. Detect if package.json or package-lock.json changed (via committed diff)
- * 2. Parse version from branch name (version/1.10.6 → v1-10-6)
- * 3. Fetch tags and find highest existing build number for that version series
- * 4. Create annotated tag on HEAD (the pushed commit with dep changes)
- * 5. Push the tag
- * 6. Update Dockerfile FROM line (image tag strips the deploy.base. prefix)
- *
- * @param {string} tmpDir - Working directory (feature branch, already committed+pushed)
- * @param {string} baseBranch - The base branch name (e.g. version/1.10.6)
- * @param {string} repoName - The repo/service name
- * @returns {{ tagged: boolean, tag?: string }} result
  */
 export function handleBaseTag(tmpDir, baseBranch, repoName) {
-  // Pre-flight: repo must have Dockerfile, Dockerfile.base, and azure-pipelines.yml
   const dockerfilePath = path.join(tmpDir, 'Dockerfile');
   const dockerfileBasePath = path.join(tmpDir, 'Dockerfile.base');
   const pipelinePath = path.join(tmpDir, 'azure-pipelines.yml');
@@ -61,7 +38,6 @@ export function handleBaseTag(tmpDir, baseBranch, repoName) {
     return { tagged: false };
   }
 
-  // Verify Dockerfile FROM line references this service's base image
   const dockerfile = fs.readFileSync(dockerfilePath, 'utf-8');
   const fromMatch = dockerfile.match(/^FROM\s+([\w.\-]+\/base-images\/\S+?):\S+/m);
   if (!fromMatch || !fromMatch[1].endsWith(`/${repoName}`)) {
@@ -72,7 +48,6 @@ export function handleBaseTag(tmpDir, baseBranch, repoName) {
   const registry = fromMatch[1];
   const tagPrefix = 'deploy.base';
 
-  // Check if dependency files changed in the committed diff against the base branch
   let changedFiles;
   try {
     changedFiles = execGit(`git diff "origin/${baseBranch}" HEAD --name-only`, tmpDir).trim();
@@ -95,7 +70,6 @@ export function handleBaseTag(tmpDir, baseBranch, repoName) {
 
   log('Dependency changes detected, creating base tag...');
 
-  // Parse version from branch name: version/1.10.6 → v1-10-6
   const versionMatch = baseBranch.match(/version\/(.+)/);
   if (!versionMatch) {
     warn(`Cannot parse version from branch name: ${baseBranch}`);
@@ -103,10 +77,8 @@ export function handleBaseTag(tmpDir, baseBranch, repoName) {
   }
   const versionSlug = 'v' + versionMatch[1].replace(/\./g, '-');
 
-  // Fetch tags to find highest build number
   execGit('git fetch origin --tags', tmpDir);
 
-  // Tag format: deploy.base.v1-10-5-1 (hyphen before build number)
   const tagPattern = `${tagPrefix}.${versionSlug}-`;
 
   let existingTags;
@@ -119,7 +91,6 @@ export function handleBaseTag(tmpDir, baseBranch, repoName) {
   let nextBuild = 1;
   if (existingTags) {
     const escapedPattern = tagPattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    // Only match simple build numbers (1-4 digits), ignore timestamp-format tags
     const buildNumbers = existingTags
       .split('\n')
       .map(tag => {
@@ -135,15 +106,10 @@ export function handleBaseTag(tmpDir, baseBranch, repoName) {
   const newTag = `${tagPrefix}.${versionSlug}-${nextBuild}`;
   log(`Creating base tag: ${newTag}`);
 
-  // Tag HEAD — the feature branch commit that already has dep changes committed+pushed
   execGit(`git tag -a "${newTag}" HEAD -m "Base image tag for ${baseBranch}"`, tmpDir);
-
-  // Push the tag
   execGit(`git push origin "${newTag}"`, tmpDir);
   log(`Base tag pushed: ${newTag}`);
 
-  // Update Dockerfile FROM line
-  // The image tag strips the "deploy.base." prefix per the pipeline convention
   const imageTag = `${versionSlug}-${nextBuild}`;
   {
     let updatedDockerfile = fs.readFileSync(dockerfilePath, 'utf-8');

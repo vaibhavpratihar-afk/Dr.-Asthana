@@ -6,7 +6,6 @@
  * - File logging organized by date/run
  * - Step tracking with durations
  * - Separate error log file
- * - Detailed debug mode
  */
 
 import fs from 'fs';
@@ -43,44 +42,37 @@ let runLogPath = null;
 let errorLogPath = null;
 let debugMode = true;
 
-/**
- * Initialize a new run
- */
 export function initRun(ticketKey, logDirectory = './logs') {
   const now = new Date();
-  const dateStr = now.toISOString().split('T')[0]; // YYYY-MM-DD
-  const timeStr = now.toTimeString().split(' ')[0].replace(/:/g, '-'); // HH-MM-SS
+  const dateStr = now.toISOString().split('T')[0];
+  const timeStr = now.toTimeString().split(' ')[0].replace(/:/g, '-');
 
   currentRunId = `${dateStr}_${timeStr}_${ticketKey || 'batch'}`;
   currentTicketKey = ticketKey;
   runStartTime = now;
   logDir = logDirectory;
 
-  // Create log directory structure: logs/YYYY-MM-DD/
   const dayDir = path.join(logDir, dateStr);
   if (!fs.existsSync(dayDir)) {
     fs.mkdirSync(dayDir, { recursive: true });
   }
 
-  // Create run-specific log files
   runLogPath = path.join(dayDir, `${currentRunId}.log`);
   errorLogPath = path.join(dayDir, `${currentRunId}.errors.log`);
 
-  // Write run header
   const header = [
-    '═'.repeat(80),
+    '='.repeat(80),
     `RUN: ${currentRunId}`,
     `Ticket: ${ticketKey || 'N/A'}`,
     `Started: ${now.toISOString()}`,
     `Machine: ${process.platform} ${process.arch}`,
     `Node: ${process.version}`,
-    '═'.repeat(80),
+    '='.repeat(80),
     '',
   ].join('\n');
 
   fs.writeFileSync(runLogPath, header);
 
-  // Console banner
   console.log('');
   console.log(`${COLORS.bgBlue}${COLORS.bold}${COLORS.white} RUN STARTED ${COLORS.reset} ${COLORS.bold}${ticketKey || 'batch'}${COLORS.reset}`);
   console.log(`${COLORS.dim}  ID      ${COLORS.reset}${currentRunId}`);
@@ -90,38 +82,23 @@ export function initRun(ticketKey, logDirectory = './logs') {
   return currentRunId;
 }
 
-/**
- * Get current run ID
- */
 export function getRunId() {
   return currentRunId;
 }
 
-/**
- * Get current run log file path (before finalizeRun resets it)
- */
 export function getRunLogPath() {
   return runLogPath;
 }
 
-/**
- * Enable/disable debug mode for verbose logging
- */
 export function setDebugMode(enabled) {
   debugMode = enabled;
 }
 
-/**
- * Format timestamp for display
- */
 function getTimestamp() {
   const now = new Date();
   return now.toISOString().replace('T', ' ').substring(0, 23);
 }
 
-/**
- * Format timestamp for console (short version)
- */
 function getShortTimestamp() {
   const now = new Date();
   const hours = String(now.getHours()).padStart(2, '0');
@@ -130,16 +107,10 @@ function getShortTimestamp() {
   return `${hours}:${minutes}:${seconds}`;
 }
 
-/**
- * Strip ANSI color codes for file output
- */
 function stripColors(text) {
   return text.replace(/\x1b\[[0-9;]*m/g, '');
 }
 
-/**
- * Write to log file
- */
 function writeToFile(level, message, isError = false) {
   if (!runLogPath) return;
 
@@ -149,8 +120,6 @@ function writeToFile(level, message, isError = false) {
 
   try {
     fs.appendFileSync(runLogPath, line);
-
-    // Also write errors to error log
     if (isError && errorLogPath) {
       fs.appendFileSync(errorLogPath, line);
     }
@@ -159,9 +128,6 @@ function writeToFile(level, message, isError = false) {
   }
 }
 
-/**
- * Format console message with colors
- */
 function formatConsole(color, prefix, ...args) {
   const timestamp = `${COLORS.dim}${getShortTimestamp()}${COLORS.reset}`;
   const stepInfo = currentStep ? `${COLORS.cyan}${COLORS.bold}[S${currentStep}]${COLORS.reset}` : '';
@@ -170,11 +136,7 @@ function formatConsole(color, prefix, ...args) {
   return [timestamp, stepInfo, coloredPrefix, ...message].filter(Boolean);
 }
 
-/**
- * Start a new step
- */
 export function startStep(stepNumber, stepName) {
-  // End previous step if any
   if (currentStep && stepStartTime) {
     const duration = ((Date.now() - stepStartTime) / 1000).toFixed(2);
     writeToFile('STEP', `Step ${currentStep} completed in ${duration}s`);
@@ -189,9 +151,6 @@ export function startStep(stepNumber, stepName) {
   writeToFile('STEP', `Starting: ${stepName}`);
 }
 
-/**
- * End current step with result
- */
 export function endStep(success = true, message = '') {
   if (!currentStep || !stepStartTime) return;
 
@@ -206,9 +165,6 @@ export function endStep(success = true, message = '') {
   stepStartTime = null;
 }
 
-/**
- * Finalize run
- */
 export function finalizeRun(success = true, summary = '') {
   if (!runStartTime) return;
 
@@ -218,12 +174,12 @@ export function finalizeRun(success = true, summary = '') {
 
   const footer = [
     '',
-    '═'.repeat(80),
+    '='.repeat(80),
     `RUN ${status}`,
     `Duration: ${duration}s`,
     `Summary: ${summary}`,
     `Ended: ${new Date().toISOString()}`,
-    '═'.repeat(80),
+    '='.repeat(80),
   ].join('\n');
 
   writeToFile('RUN', `${status}: ${summary} (${duration}s)`, !success);
@@ -241,7 +197,6 @@ export function finalizeRun(success = true, summary = '') {
     console.log(`  ${COLORS.red}Errors${COLORS.reset}   ${errorLogPath}`);
   }
 
-  // Reset state
   currentRunId = null;
   currentTicketKey = null;
   runStartTime = null;
@@ -249,118 +204,65 @@ export function finalizeRun(success = true, summary = '') {
   errorLogPath = null;
 }
 
-/**
- * Log info message
- */
 export function log(...args) {
   const message = args.join(' ');
   console.log(...formatConsole(COLORS.blue, '[INFO]', ...args));
   writeToFile('INFO', message);
 }
 
-/**
- * Log success message
- */
 export function ok(...args) {
   const message = args.join(' ');
   console.log(...formatConsole(COLORS.green, '[OK]', ...args));
   writeToFile('OK', message);
 }
 
-/**
- * Log warning message
- */
 export function warn(...args) {
   const message = args.join(' ');
   console.log(...formatConsole(COLORS.yellow, '[WARN]', ...args));
   writeToFile('WARN', message);
 }
 
-/**
- * Log error message
- */
 export function err(...args) {
   const message = args.join(' ');
   console.error(...formatConsole(COLORS.red, '[ERROR]', ...args));
   writeToFile('ERROR', message, true);
 }
 
-/**
- * Log debug message (only when debug mode is enabled)
- */
 export function debug(...args) {
   if (!debugMode) return;
-
   const message = args.join(' ');
   console.log(...formatConsole(COLORS.gray, '[DEBUG]', ...args));
   writeToFile('DEBUG', message);
 }
 
-/**
- * Log detailed object/data for debugging
- */
 export function logData(label, data) {
   const dataStr = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
-
   console.log(`${COLORS.cyan}${COLORS.bold}[DATA]${COLORS.reset} ${COLORS.cyan}${label}:${COLORS.reset}`);
-  // Indent the data block and dim it for visual separation
   const indented = dataStr.split('\n').map(l => `  ${COLORS.dim}${l}${COLORS.reset}`).join('\n');
   console.log(indented);
-
   writeToFile('DATA', `${label}: ${dataStr}`);
 }
 
-/**
- * Log API request for debugging
- */
 export function logApi(method, url, statusCode, duration) {
   const statusColor = statusCode >= 400 ? COLORS.red : COLORS.green;
   const methodColor = `${COLORS.bold}${COLORS.cyan}${method}${COLORS.reset}`;
   const statusBadge = `${statusColor}${COLORS.bold}${statusCode}${COLORS.reset}`;
-
   console.log(`${COLORS.dim}${getShortTimestamp()}${COLORS.reset} ${COLORS.bold}[API]${COLORS.reset} ${methodColor} ${url} ${statusBadge} ${COLORS.dim}${duration}ms${COLORS.reset}`);
-  writeToFile('API', `${method} ${url} → ${statusCode} (${duration}ms)`, statusCode >= 400);
+  writeToFile('API', `${method} ${url} -> ${statusCode} (${duration}ms)`, statusCode >= 400);
 }
 
-/**
- * Log command execution
- */
 export function logCmd(command, exitCode = 0, duration = 0) {
   const truncatedCmd = command.length > 100 ? command.substring(0, 100) + '...' : command;
   const exitColor = exitCode !== 0 ? COLORS.red : COLORS.green;
-
   console.log(`${COLORS.dim}${getShortTimestamp()}${COLORS.reset} ${COLORS.bold}[CMD]${COLORS.reset} ${COLORS.dim}$${COLORS.reset} ${truncatedCmd} ${exitColor}${COLORS.bold}exit ${exitCode}${COLORS.reset} ${COLORS.dim}${duration}ms${COLORS.reset}`);
-  writeToFile('CMD', `$ ${truncatedCmd} → exit ${exitCode} (${duration}ms)`, exitCode !== 0);
+  writeToFile('CMD', `$ ${truncatedCmd} -> exit ${exitCode} (${duration}ms)`, exitCode !== 0);
 }
 
-/**
- * Get summary of logged errors for a run
- */
 export function getErrorSummary() {
   if (!errorLogPath || !fs.existsSync(errorLogPath)) {
     return 'No errors logged';
   }
-
   const content = fs.readFileSync(errorLogPath, 'utf-8');
   const lines = content.split('\n').filter(Boolean);
   return `${lines.length} error(s) logged. See: ${errorLogPath}`;
 }
-
-export default {
-  initRun,
-  getRunId,
-  getRunLogPath,
-  setDebugMode,
-  startStep,
-  endStep,
-  finalizeRun,
-  log,
-  ok,
-  warn,
-  err,
-  debug,
-  logData,
-  logApi,
-  logCmd,
-  getErrorSummary,
-};
