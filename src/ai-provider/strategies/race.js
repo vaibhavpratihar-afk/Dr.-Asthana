@@ -5,7 +5,7 @@
  * Optimizes for speed over quality.
  */
 
-import { isGarbageOutput, isRateLimited } from '../provider.js';
+import { isGarbageOutput, buildResult, buildFailureResult } from '../provider.js';
 import { log, warn } from '../../utils/logger.js';
 
 /**
@@ -56,15 +56,7 @@ export async function run(prompt, workingDir, modeConfig, adapters, spawnFn, opt
 
     const tryReject = (err, providerName) => {
       warn(`[${options.label}] Race: ${providerName} failed: ${err.message}`);
-      results.push({
-        output: '',
-        completedNormally: false,
-        exitCode: -1,
-        numTurns: null,
-        rateLimited: false,
-        provider: providerName,
-        duration: 0,
-      });
+      results.push(buildFailureResult(providerName));
 
       if (results.length >= 2 && !settled) {
         settled = true;
@@ -93,7 +85,10 @@ async function runProvider(providerName, prompt, workingDir, modeConfig, adapter
   const adapter = adapters[providerName];
   if (!adapter) throw new Error(`Unknown provider: ${providerName}`);
 
-  const providerConfig = modeConfig[providerName] || {};
+  const providerConfig = {
+    ...(modeConfig[providerName] || {}),
+    ...(options.resumeSessionId && { resumeSessionId: options.resumeSessionId }),
+  };
   const { args, timeout } = adapter.buildArgs(prompt, providerConfig);
 
   const raw = await spawnFn({
@@ -110,13 +105,5 @@ async function runProvider(providerName, prompt, workingDir, modeConfig, adapter
 
   const parsed = adapter.parseStreamOutput(raw.stdout, raw.exitCode);
 
-  return {
-    output: parsed.output,
-    completedNormally: parsed.completedNormally,
-    exitCode: raw.exitCode,
-    numTurns: parsed.numTurns,
-    rateLimited: isRateLimited(parsed.output) || adapter.isRateLimited(parsed.output),
-    provider: providerName,
-    duration: raw.duration,
-  };
+  return buildResult(raw, parsed, providerName, adapter);
 }

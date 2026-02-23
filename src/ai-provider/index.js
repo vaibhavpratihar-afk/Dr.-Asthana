@@ -8,7 +8,7 @@
  * Supports multiple modes: execute, debate, evaluate.
  */
 
-import { spawn } from './provider.js';
+import { spawn, buildResult } from './provider.js';
 import * as claudeAdapter from './adapters/claude.js';
 import * as codexAdapter from './adapters/codex.js';
 import { run as runSingle } from './strategies/single.js';
@@ -43,11 +43,54 @@ const STRATEGIES = {
  * @param {string} [options.logDir] - Where to write log files
  * @param {string} [options.ticketKey] - JIRA ticket key for log filenames
  * @param {object} options.config - Full config object (aiProvider section extracted internally)
- * @returns {Promise<{output: string, completedNormally: boolean, exitCode: number, numTurns: number|null, rateLimited: boolean, provider: string, duration: number}>}
+ * @param {object} [options.providerConfig] - Per-call provider override. When present, bypasses strategy
+ *   and spawns directly with this provider+model. Shape: { provider, model, maxTurns?, timeoutMinutes? }
+ * @param {string} [options.resumeSessionId] - Session/thread ID from a previous call to resume conversation
+ * @returns {Promise<{output: string, completedNormally: boolean, exitCode: number, numTurns: number|null, rateLimited: boolean, provider: string, duration: number, sessionId: string|null}>}
  */
 export async function runAI(options) {
-  const { prompt, workingDir, mode, label, logDir, ticketKey, config } = options;
+  const { prompt, workingDir, mode, label, logDir, ticketKey, config, providerConfig, resumeSessionId } = options;
 
+  // --- Per-call provider override: bypass strategy entirely ---
+  if (providerConfig) {
+    const providerName = providerConfig.provider || 'claude';
+    const adapter = ADAPTERS[providerName];
+    if (!adapter) {
+      throw new Error(`Unknown provider in providerConfig: ${providerName}`);
+    }
+
+    // Merge mode-level allowedTools if not specified in providerConfig
+    const modeConfig = config.aiProvider?.[mode] || {};
+    const effectiveConfig = {
+      ...providerConfig,
+      allowedTools: providerConfig.allowedTools || modeConfig.allowedTools || null,
+      ...(resumeSessionId && { resumeSessionId }),
+    };
+
+    log(`[${label}] runAI: mode=${mode}, direct provider=${providerName}, model=${effectiveConfig.model || 'default'}${resumeSessionId ? `, resume=${resumeSessionId.substring(0, 8)}...` : ''}`);
+    log(`[${label}] Prompt length: ${prompt.length} characters`);
+
+    const { args, timeout } = adapter.buildArgs(prompt, effectiveConfig);
+    const raw = await spawn({
+      command: adapter.getCommand(),
+      args,
+      workingDir,
+      timeout,
+      label,
+      logDir,
+      ticketKey,
+      provider: providerName,
+      prompt,
+    });
+
+    const parsed = adapter.parseStreamOutput(raw.stdout, raw.exitCode);
+    const result = buildResult(raw, parsed, providerName, adapter);
+
+    log(`[${label}] runAI complete: provider=${result.provider}, exit=${result.exitCode}, duration=${Math.floor(result.duration / 1000)}s, output=${result.output?.length || 0} chars${result.sessionId ? `, session=${result.sessionId.substring(0, 8)}...` : ''}`);
+    return result;
+  }
+
+  // --- Standard strategy-based flow ---
   const aiConfig = config.aiProvider || {};
   const strategy = aiConfig.strategy || 'single';
   const modeConfig = aiConfig[mode];
@@ -69,9 +112,10 @@ export async function runAI(options) {
     logDir,
     ticketKey,
     mode,
+    resumeSessionId,
   });
 
-  log(`[${label}] runAI complete: provider=${result.provider}, exit=${result.exitCode}, duration=${Math.floor(result.duration / 1000)}s, output=${result.output?.length || 0} chars`);
+  log(`[${label}] runAI complete: provider=${result.provider}, exit=${result.exitCode}, duration=${Math.floor(result.duration / 1000)}s, output=${result.output?.length || 0} chars${result.sessionId ? `, session=${result.sessionId.substring(0, 8)}...` : ''}`);
 
   return result;
 }

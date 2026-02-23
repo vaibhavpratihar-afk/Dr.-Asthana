@@ -1,5 +1,6 @@
 node_modules/
 .tmp/
+# Debate workspace lives under .pipeline-state/{ticketKey}/debate/
 .pipeline-state/
 logs/
 *.log

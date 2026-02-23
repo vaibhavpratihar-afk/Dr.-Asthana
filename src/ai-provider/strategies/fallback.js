@@ -4,7 +4,7 @@
  * Failure conditions: non-zero exit, timeout, rate limit, garbage output.
  */
 
-import { isGarbageOutput, isRateLimited } from '../provider.js';
+import { isGarbageOutput, buildResult, buildFailureResult } from '../provider.js';
 import { log, warn } from '../../utils/logger.js';
 
 /**
@@ -48,7 +48,10 @@ async function runProvider(providerName, prompt, workingDir, modeConfig, adapter
     throw new Error(`Unknown provider: ${providerName}`);
   }
 
-  const providerConfig = modeConfig[providerName] || {};
+  const providerConfig = {
+    ...(modeConfig[providerName] || {}),
+    ...(options.resumeSessionId && { resumeSessionId: options.resumeSessionId }),
+  };
   const { args, timeout } = adapter.buildArgs(prompt, providerConfig);
 
   try {
@@ -66,25 +69,9 @@ async function runProvider(providerName, prompt, workingDir, modeConfig, adapter
 
     const parsed = adapter.parseStreamOutput(raw.stdout, raw.exitCode);
 
-    return {
-      output: parsed.output,
-      completedNormally: parsed.completedNormally,
-      exitCode: raw.exitCode,
-      numTurns: parsed.numTurns,
-      rateLimited: isRateLimited(parsed.output) || adapter.isRateLimited(parsed.output),
-      provider: providerName,
-      duration: raw.duration,
-    };
+    return buildResult(raw, parsed, providerName, adapter);
   } catch (err) {
     warn(`[${options.label}] Provider ${providerName} threw: ${err.message}`);
-    return {
-      output: '',
-      completedNormally: false,
-      exitCode: -1,
-      numTurns: null,
-      rateLimited: false,
-      provider: providerName,
-      duration: 0,
-    };
+    return buildFailureResult(providerName);
   }
 }

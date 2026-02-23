@@ -206,6 +206,38 @@ export function isRateLimited(text) {
 }
 
 /**
+ * Build a standardized result object from raw spawn output and parsed adapter output.
+ */
+export function buildResult(raw, parsed, providerName, adapter) {
+  return {
+    output: parsed.output,
+    completedNormally: parsed.completedNormally,
+    exitCode: raw.exitCode,
+    numTurns: parsed.numTurns,
+    rateLimited: isRateLimited(parsed.output) || adapter.isRateLimited(parsed.output),
+    provider: providerName,
+    duration: raw.duration,
+    sessionId: parsed.sessionId || null,
+  };
+}
+
+/**
+ * Build a standardized failure result for a provider that threw or couldn't run.
+ */
+export function buildFailureResult(providerName) {
+  return {
+    output: '',
+    completedNormally: false,
+    exitCode: -1,
+    numTurns: null,
+    rateLimited: false,
+    provider: providerName,
+    duration: 0,
+    sessionId: null,
+  };
+}
+
+/**
  * Pick the best output from multiple results.
  * Prefers structured output (FILES CHANGED/SUMMARY), then longer non-garbage, then any non-empty.
  */

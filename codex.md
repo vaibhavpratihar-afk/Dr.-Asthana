@@ -51,13 +51,21 @@ src/
       race.js             → Run both, return whichever finishes first
   agent/
     index.js              → Deliberately dumb executor (static prompt + cheatsheet → runAI)
+  council/
+    index.js              → Public API: createCouncil()
+    council.js            → Round orchestrator (proposer → critics → agreement → evaluate)
+    runner.js             → AI call wrapper with session memory across rounds
+    evaluator.js          → Configurable quality gate (structural pre-checks + AI evaluation)
+    workspace.js          → File-based observability, round artifacts, human-in-the-loop
+    defaults.js           → Default agreement role, structural checks, approval/rejection keywords
   infra/
     index.js              → Infrastructure lifecycle (start/stop MongoDB, Redis, Kafka)
   jira/
     index.js              → Public API re-exports
-    client.js             → JIRA REST API (getTicketDetails, getTicketStatus)
-    parser.js             → Ticket parsing, ADF text extraction, fix-version-to-branch mapping
+    client.js             → JIRA REST API (getTicketDetails, getTicketStatus) — read-only
+    parser.js             → Ticket parsing, ADF→markdown, fix-version-to-branch mapping
     transitions.js        → JIRA CLI operations via jira-cli.mjs (transitions, comments, search, labels)
+    validator.js          → Pre-processing ticket validation (required fields, scope checks)
   notification/
     index.js              → Public API: postJiraStep, postFinalJiraReport, notifySlack*, uploadLogFile
     report.js             → Report builders (JIRA ADF comments, Slack Block Kit messages)
@@ -67,11 +75,10 @@ src/
     checkpoint.js         → Checkpoint persistence (.pipeline-state/<ticketKey>/)
     steps.js              → Step definitions (FETCH_TICKET through NOTIFY)
   prompt/
-    index.js              → Orchestrates: ticket context → codebase context → debate → cheatsheet
-    debate.js             → Debate engine (Agent A proposes, Agent B critiques, evaluator judges)
-    evaluator.js          → Quality gate (structural checks + lightweight AI extraction)
+    index.js              → Orchestrates: ticket context → codebase context → council → cheatsheet
+    council-prompts.js    → Prompt builders for council phases (proposer, critic, agreement)
     validator.js          → Post-execution validation (git diff, file alignment, debug log check)
-    static.js             → Static system prompt for the executor
+    static.js             → Static system prompt for the executor agent
     ticket-context.js     → Builds ticket context markdown from parsed ticket data
     codebase-context.js   → Reads CLAUDE.md/CODEX.md/codex.md, file tree, package.json from clone
   service/
@@ -89,51 +96,69 @@ agent-rules-no-tests.md    → Standing rules injected when tests handled extern
 config.json                → Runtime configuration (JIRA, Azure DevOps, services, Slack, aiProvider)
 ```
 
-## Core Architecture: Separate Thinking from Doing
+## Core Architecture: Council-then-Execute
 
-The system uses a **debate-then-execute** paradigm:
+The system separates **thinking** from **doing**: expensive models collaborate in a council to produce a plan, then a cheap model executes it.
 
-1. **Debate** (expensive models): Two AI agents argue over implementation strategy across multiple rounds. Agent A proposes, Agent B critiques. Both use read-only tools only (Read, Glob, Grep).
-2. **Evaluate**: A quality gate judges the debate output using structural checks + a lightweight AI call. Extracts a clean **cheatsheet** — a step-by-step implementation guide.
-3. **Execute** (cheap model): A deliberately dumb executor follows the cheatsheet exactly. No planning, no exploration, no decisions.
+### 1. Council (expensive models)
+A group of AI agents collaborate via file-based discussions to produce an actionable output. A proposer explores the codebase and proposes a strategy, critic agents challenge and verify claims, then the proposer synthesizes critiques into a unified plan (AGREED/DISAGREE protocol). Runs 1-3 rounds until convergence. All discussions are persisted to disk for full visibility. Human feedback can be injected mid-council via a `human-feedback.md` file. Agents maintain session memory across rounds to avoid re-reading the codebase.
 
-The **cheatsheet** is the most valuable artifact. It's persisted to `.pipeline-state/<ticketKey>/cheatsheet.md` so failed executions can retry without re-debating.
+### 2. Evaluate (configurable quality gate)
+Structural pre-checks (fast, no API calls: minimum length, file paths, action verbs) followed by an AI evaluator that judges the council output and extracts a clean artifact between configurable markers.
 
-## AI Provider Module
-All AI CLI spawning goes through `src/ai-provider/`. No other module spawns `claude` or `codex` directly.
+### 3. Execute (cheap model)
+A deliberately dumb executor follows the extracted cheatsheet exactly. No planning, no exploration, no decisions.
+
+The **cheatsheet** is the most valuable artifact. It's persisted to `.pipeline-state/<ticketKey>/cheatsheet.md` so failed executions can retry without re-running the council.
+
+## Council Module (`src/council/`)
+A reusable multi-agent deliberation engine — decoupled from any specific use case. The caller configures everything: goal, context, agent roles, prompt builders, evaluation criteria, and output format. The council handles: round orchestration, turn-taking, session continuity (memory), file-based discussions, human-in-the-loop, and failure recovery.
+
+**Round flow:**
+1. **Proposer** (agent-0): Proposes strategy (round 1) or revises based on critiques (round 2+)
+2. **Critics** (agent-1..N): Each critiques the proposal, sees prior critics' outputs
+3. **Agreement**: Proposer synthesizes all critiques → responds AGREED or DISAGREE
+4. **Evaluate**: Structural pre-checks + AI quality gate → extract output or reject
+
+**Workspace** (`.pipeline-state/<label>/council/`): All agent discussions are written as files. Status, round artifacts, and human feedback are all file-based for full transparency.
+
+**Failure modes:** Critic fails → skip. Zero critics → use proposer directly. Proposer fails → break. Max rounds → force-evaluate.
+
+## AI Provider Module (`src/ai-provider/`)
+Single interface for all AI CLI spawning. No other module spawns `claude` or `codex` directly.
 
 ### Modes
-| Mode | Purpose | Tools | Model | Called By |
-|------|---------|-------|-------|----------|
-| `execute` | Run cheatsheet — write code | Read,Write,Edit,Bash,Glob,Grep | Cheap (haiku) | Agent Module |
-| `debate` | Explore codebase, argue strategy | Read,Glob,Grep (read-only) | Expensive (sonnet) | Prompt Module |
-| `evaluate` | Judge debate output quality | Read,Glob,Grep | Expensive (sonnet) | Prompt Module |
+| Mode | Purpose | Tools | Model | Used By |
+|------|---------|-------|-------|---------|
+| `execute` | Follow cheatsheet — write code | Read,Write,Edit,Bash,Glob,Grep | Cheap (haiku) | Agent |
+| `debate` | Explore codebase, argue strategy | Read,Glob,Grep (read-only) | Expensive (sonnet) | Council |
+| `evaluate` | Judge council output quality | Read,Glob,Grep | Expensive (sonnet) | Council Evaluator |
 
 ### Strategies
 - **single** (default): One provider, return result.
-- **fallback**: Primary provider first, secondary on failure.
-- **parallel**: Both providers simultaneously, pick best result.
-- **race**: Both providers, return whichever finishes first.
-
-## Processing Model
-- One service, one branch at a time — fully sequential.
-- Each branch gets a fresh clone, processes completely (Clone → Debate → Execute → Validate → Commit → Push → Base tag → PR → Cleanup), then the next branch starts.
-- No shared git state between branches; each is fully isolated.
-- Multi-version tickets: each fix version produces a separate branch and PR per service.
+- **fallback**: Primary first, secondary on failure.
+- **parallel**: Both simultaneously, pick best result.
+- **race**: Both simultaneously, return whichever finishes first.
 
 ## Processing Pipeline
 ```
-Step 1:   Fetch & parse ticket
-Step 2:   Validate required fields
-Step 2.5: Transition to In-Progress + JIRA comment
-Steps 3-7: For each service × branch:
-  Step 3: Clone repo, create feature branch
-  Step 4: Build cheatsheet (ticket context → codebase context → debate → evaluate)
-  Step 5: Execute cheatsheet (cheap model follows instructions)
-  Step 6: Validate execution (git diff, file alignment)
-  Step 7: Commit, push, base tag, create PR
-Step 8:   Transition to LEAD REVIEW + final JIRA report + Slack DM + label updates
+Step 1:   FETCH_TICKET — fetch from JIRA REST API, parse ADF → markdown
+Step 2:   VALIDATE_TICKET — required fields, scope checks, service config lookup
+Step 2.5: Transition to In-Progress + JIRA comment with scope details
+Steps 3-7: For each service × branch (fully sequential, isolated clones):
+  Step 3: CLONE_REPO — shallow clone, create feature branch, inject agent rules
+  Step 4: BUILD_CHEATSHEET — council deliberation → quality gate → extract cheatsheet
+  Step 5: EXECUTE — cheap model follows cheatsheet (static prompt + guardrails)
+  Step 6: VALIDATE_EXECUTION — git diff non-empty, files align, no debug logs
+  Step 7: SHIP — commit, push (force if needed), base tag if applicable, create PR
+Step 8:   NOTIFY — JIRA final report, Slack DM, log upload, label updates, transition
 ```
+
+## Processing Model
+- One service, one branch at a time — fully sequential.
+- Each branch gets a fresh clone, processes completely (Clone → Council → Execute → Validate → Ship), then the next branch starts.
+- No shared git state between branches; each is fully isolated.
+- Multi-version tickets: each fix version produces a separate branch and PR per service.
 
 ## Git Operations
 - Feature branches: `feature/{ticketKey}-{sanitized-summary}` (single branch) or `feature/{ticketKey}-{sanitized-summary}-{version}` (multi-branch).
@@ -181,6 +206,7 @@ Key sections:
 - Run-level logging: each ticket run gets a unique ID, logs to `logs/YYYY-MM-DD/{runId}.log`.
 - Step tracking with durations (startStep/endStep).
 - AI pass outputs saved to `logs/{ticketKey}-{label}-{provider}-{timestamp}.log`.
+- Council round artifacts saved to `.pipeline-state/<label>/council/round-N/`.
 - Console output with ANSI colors; file output strips colors.
 
 ## Module Boundaries

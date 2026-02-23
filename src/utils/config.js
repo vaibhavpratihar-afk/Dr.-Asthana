@@ -78,50 +78,7 @@ export function loadConfig() {
       logDir: raw.agent?.logDir || './logs',
       executionRetries: raw.agent?.executionRetries ?? 1,
     },
-    aiProvider: {
-      strategy: raw.aiProvider?.strategy || 'single',
-      execute: {
-        provider: raw.aiProvider?.execute?.provider || 'claude',
-        fallbackProvider: raw.aiProvider?.execute?.fallbackProvider || null,
-        claude: {
-          model: raw.aiProvider?.execute?.claude?.model || 'haiku',
-          maxTurns: raw.aiProvider?.execute?.claude?.maxTurns || 30,
-          timeoutMinutes: raw.aiProvider?.execute?.claude?.timeoutMinutes || 15,
-          allowedTools: raw.aiProvider?.execute?.claude?.allowedTools || 'Read,Write,Edit,Bash,Glob,Grep',
-        },
-        codex: {
-          model: raw.aiProvider?.execute?.codex?.model || null,
-          timeoutMinutes: raw.aiProvider?.execute?.codex?.timeoutMinutes || 15,
-        },
-      },
-      debate: {
-        provider: raw.aiProvider?.debate?.provider || 'claude',
-        maxRounds: raw.aiProvider?.debate?.maxRounds || 3,
-        claude: {
-          model: raw.aiProvider?.debate?.claude?.model || 'sonnet',
-          maxTurns: raw.aiProvider?.debate?.claude?.maxTurns || 15,
-          timeoutMinutes: raw.aiProvider?.debate?.claude?.timeoutMinutes || 10,
-          allowedTools: raw.aiProvider?.debate?.claude?.allowedTools || 'Read,Glob,Grep',
-        },
-        codex: {
-          model: raw.aiProvider?.debate?.codex?.model || null,
-          timeoutMinutes: raw.aiProvider?.debate?.codex?.timeoutMinutes || 10,
-        },
-      },
-      evaluate: {
-        provider: raw.aiProvider?.evaluate?.provider || 'claude',
-        claude: {
-          model: raw.aiProvider?.evaluate?.claude?.model || 'sonnet',
-          maxTurns: raw.aiProvider?.evaluate?.claude?.maxTurns || 5,
-          timeoutMinutes: raw.aiProvider?.evaluate?.claude?.timeoutMinutes || 5,
-          allowedTools: raw.aiProvider?.evaluate?.claude?.allowedTools || 'Read,Glob,Grep',
-        },
-        codex: {
-          model: raw.aiProvider?.evaluate?.codex?.model || null,
-          timeoutMinutes: raw.aiProvider?.evaluate?.codex?.timeoutMinutes || 5,
-        },
-      },
-    },
+    aiProvider: buildAiProviderConfig(raw),
     infra: {
       enabled: raw.infra?.enabled ?? false,
       scriptsDir: raw.infra?.scriptsDir || '',
@@ -133,6 +90,56 @@ export function loadConfig() {
   };
 
   return config;
+}
+
+function buildModeConfig(modeRaw, defaults) {
+  const { claudeModel, claudeMaxTurns, claudeTimeout, codexTimeout, allowedTools } = defaults;
+  return {
+    provider: modeRaw?.provider || 'claude',
+    fallbackProvider: modeRaw?.fallbackProvider || null,
+    allowedTools: modeRaw?.allowedTools || modeRaw?.claude?.allowedTools || allowedTools,
+    claude: {
+      model: modeRaw?.claude?.model || claudeModel,
+      maxTurns: modeRaw?.claude?.maxTurns || claudeMaxTurns,
+      timeoutMinutes: modeRaw?.claude?.timeoutMinutes || claudeTimeout,
+      allowedTools: modeRaw?.claude?.allowedTools || allowedTools,
+    },
+    codex: {
+      model: modeRaw?.codex?.model || null,
+      timeoutMinutes: modeRaw?.codex?.timeoutMinutes || codexTimeout,
+    },
+  };
+}
+
+function buildAiProviderConfig(raw) {
+  const ai = raw.aiProvider || {};
+
+  const execute = {
+    ...buildModeConfig(ai.execute, {
+      claudeModel: 'haiku', claudeMaxTurns: 30, claudeTimeout: 15,
+      codexTimeout: 15, allowedTools: 'Read,Write,Edit,Bash,Glob,Grep',
+    }),
+  };
+
+  const debate = {
+    ...buildModeConfig(ai.debate, {
+      claudeModel: 'sonnet', claudeMaxTurns: 15, claudeTimeout: 10,
+      codexTimeout: 10, allowedTools: 'Read,Glob,Grep',
+    }),
+    maxRounds: ai.debate?.maxRounds || 3,
+    ...(Array.isArray(ai.debate?.debaters) && { debaters: ai.debate.debaters }),
+  };
+
+  const evaluate = {
+    ...buildModeConfig(ai.evaluate, {
+      claudeModel: 'sonnet', claudeMaxTurns: 5, claudeTimeout: 5,
+      codexTimeout: 5, allowedTools: 'Read,Glob,Grep',
+    }),
+    ...(Array.isArray(ai.evaluate?.evaluators) && { evaluators: ai.evaluate.evaluators }),
+    ...(ai.evaluate?.strategy && { strategy: ai.evaluate.strategy }),
+  };
+
+  return { strategy: ai.strategy || 'single', execute, debate, evaluate };
 }
 
 /**

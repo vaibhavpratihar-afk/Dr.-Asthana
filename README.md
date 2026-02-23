@@ -1,16 +1,39 @@
 # Auto Dev Agent (Dr. Asthana) v2
 
-An autonomous AI developer agent that picks up JIRA tickets, debates implementation strategy using multiple AI agents, and submits draft PRs for human review.
+An autonomous AI developer agent that picks up JIRA tickets, runs a multi-agent council to debate implementation strategy, and submits draft PRs for human review.
 
-## Architecture: Separate Thinking from Doing
+## Architecture: Council-then-Execute
 
-The core insight: **expensive models think, cheap models do.**
+The core insight: **expensive models think together, a cheap model does the work.**
 
-1. **Debate** — Two AI agents (Agent A and Agent B) argue over implementation strategy across multiple rounds, using only read-only tools. Agent A proposes, Agent B critiques.
-2. **Evaluate** — A quality gate judges the debate output and extracts a clean **cheatsheet** — a step-by-step implementation guide.
-3. **Execute** — A deliberately dumb executor follows the cheatsheet exactly. No planning, no exploration, no decisions.
+```
+JIRA Ticket
+    ↓
+┌─────────────────────────────────────────────────────────────┐
+│  COUNCIL (expensive models, read-only tools)                │
+│                                                             │
+│  Round 1..N:                                                │
+│    Proposer → explores codebase, proposes strategy          │
+│    Critics  → challenge, verify claims, find gaps           │
+│    Agreement → AGREED (unified plan) or DISAGREE (retry)    │
+│                                                             │
+│  All discussions written to files for full visibility.      │
+│  Agents have session memory — no rework across rounds.      │
+│  Human feedback via human-feedback.md at any time.          │
+│                                                             │
+│  ↓ Quality gate: structural checks + AI evaluator           │
+│  ↓ Extract cheatsheet between configurable markers          │
+└─────────────────────────────────────────────────────────────┘
+    ↓
+┌─────────────────────────────────────────────────────────────┐
+│  EXECUTE (cheap model, full tools)                          │
+│  Follows cheatsheet exactly. No planning. No decisions.     │
+└─────────────────────────────────────────────────────────────┘
+    ↓
+Validate → Commit → Push → PR on Azure DevOps
+```
 
-The **cheatsheet** is the most valuable artifact. It's persisted to disk so failed executions can retry without re-debating.
+The **cheatsheet** is the most valuable artifact. It's persisted to disk so failed executions can retry without re-running the council.
 
 ## Tech Stack
 
@@ -31,15 +54,25 @@ src/
     provider.js           → Core spawn engine (process lifecycle, streaming, timeout)
     adapters/             → Claude Code and Codex CLI adapters
     strategies/           → single, fallback, parallel, race
-  agent/                  → Deliberately dumb executor
-    index.js              → execute(cheatsheet, cloneDir, config)
+  agent/                  → Deliberately dumb executor (static prompt + cheatsheet)
+  council/                → Reusable multi-agent deliberation engine
+    council.js            → Round orchestrator (proposer → critics → agreement → evaluate)
+    runner.js             → AI call wrapper with session memory
+    evaluator.js          → Configurable quality gate (structural + AI)
+    workspace.js          → File-based observability and human feedback
+    defaults.js           → Default agreement role, structural checks, keywords
   infra/                  → MongoDB/Redis/Kafka lifecycle
-  jira/                   → JIRA REST API, ticket parser, CLI transitions
-  notification/           → Slack DMs, JIRA comment builders, report formatters
+  jira/                   → JIRA REST API (read), CLI operations (write), ticket parser, validator
+  notification/           → Slack DMs, JIRA ADF comments, report formatters, log upload
   pipeline/               → Orchestrator, checkpoint persistence, step definitions
-  prompt/                 → Debate engine, evaluator, validator, context builders
-  service/                → Git operations, Azure DevOps PR creation, base tagger
-  utils/                  → Config loader, logger, summariser
+  prompt/                 → All prompt construction: council config, context builders, executor rules
+    council-prompts.js    → Prompt builders for council phases (proposer, critic, agreement)
+    ticket-context.js     → Ticket data → markdown context
+    codebase-context.js   → Clone analysis → markdown context
+    static.js             → Executor guardrails (no git, no docker, follow cheatsheet)
+    validator.js          → Post-execution validation (diff, alignment, debug logs)
+  service/                → Git operations, Azure DevOps PR creation, base image tagger
+  utils/                  → Config loader, logger (run/step tracking), AI summariser
 agent-rules-with-tests.md → Rules injected into clone when tests enabled
 agent-rules-no-tests.md   → Rules injected when tests handled externally
 config.json               → Runtime configuration
@@ -49,17 +82,36 @@ config.json               → Runtime configuration
 
 1. Agent polls JIRA for tickets with the configured trigger label.
 2. Fetches and parses ticket details (title, description, comments, affected systems, fix versions).
-3. Validates required fields.
+3. Validates required fields (content, structure, scope, service config).
 4. **Transitions ticket to In-Progress** and posts a JIRA comment with scope details.
 5. For each affected service x target branch:
-   a. Clones the repo and creates a feature branch.
-   b. **Debate phase** — Agent A proposes implementation strategy, Agent B critiques (read-only tools). Runs 1-3 rounds.
-   c. **Evaluate** — Quality gate extracts a cheatsheet from the debate.
-   d. **Execute** — Cheap model follows the cheatsheet exactly.
-   e. **Validate** — Checks git diff, file alignment, leftover debug logs.
-   f. Commits, pushes, handles base image tagging, opens a PR on Azure DevOps.
+   a. Clones the repo, creates a feature branch, injects agent rules.
+   b. **Council phase** — a proposer agent explores the codebase and proposes strategy; critic agents challenge and verify (read-only tools only). Agents discuss via files with session memory. Runs 1-3 rounds until convergence or max rounds.
+   c. **Evaluate** — quality gate runs structural pre-checks + AI evaluator, extracts a clean cheatsheet.
+   d. **Execute** — cheap model follows the cheatsheet exactly (static prompt + guardrails).
+   e. **Validate** — checks git diff non-empty, changed files align with cheatsheet, no leftover debug logs.
+   f. Commits, pushes (force if needed), handles base image tagging, opens a PR on Azure DevOps.
 6. **Transitions ticket to LEAD REVIEW** (if PRs were created).
-7. Posts final JIRA comment with PR table, sends Slack DM, updates labels.
+7. Posts final JIRA comment with PR table, sends Slack DM, uploads run log to CDN, updates labels.
+
+## Council Module
+
+The council is a **reusable multi-agent deliberation engine** — decoupled from tickets or any specific use case. The caller provides everything: goal, context, agent roles, prompt builders, evaluation criteria, and output format.
+
+**What it handles:** round orchestration, turn-taking, session continuity (agents don't re-read the codebase), file-based discussions (all outputs written to disk), human-in-the-loop (drop a file to steer), and graceful degradation (critic failures skip, proposer failure breaks, last-round force-evaluates).
+
+**Workspace** — all agent discussions are written to `.pipeline-state/<label>/council/`:
+```
+council/
+├── status.md                 ← Live status with timestamps
+├── round-1/
+│   ├── agent-0-proposal.md   ← Proposer's full output
+│   ├── agent-1-critique.md   ← Critic's review
+│   ├── agreement.md          ← AGREED/DISAGREE + synthesis
+│   └── evaluation.md         ← Pass/fail + feedback
+├── round-2/ ...
+└── human-feedback.md         ← Drop this file to inject guidance mid-council
+```
 
 ## AI Provider
 
@@ -96,6 +148,16 @@ Edit `config.json` in the project root. See `config.example.json` for the full s
 | `tests` | enabled |
 
 Provider can be set per mode (`execute`, `debate`, `evaluate`) to either `claude` or `codex`.
+
+## Artifacts
+
+| Location | Purpose |
+|----------|---------|
+| `.tmp/agent-*` | Cloned repos (cleaned up after each service branch) |
+| `.pipeline-state/<ticketKey>/state.json` | Pipeline checkpoint for resume |
+| `.pipeline-state/<ticketKey>/cheatsheet.md` | Persisted cheatsheet (survives retries) |
+| `.pipeline-state/<ticketKey>/council/` | Council workspace: round artifacts, status, human feedback |
+| `logs/YYYY-MM-DD/<runId>.log` | Full run log |
 
 ## Infrastructure (Optional)
 

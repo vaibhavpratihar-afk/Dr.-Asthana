@@ -3,7 +3,7 @@
  * If it fails, return failure. No fallback.
  */
 
-import { isGarbageOutput, isRateLimited } from '../provider.js';
+import { buildResult } from '../provider.js';
 
 /**
  * @param {string} prompt
@@ -11,8 +11,8 @@ import { isGarbageOutput, isRateLimited } from '../provider.js';
  * @param {object} modeConfig - Mode-specific config section (e.g., aiProvider.execute)
  * @param {object} adapters - Map of provider name -> adapter module
  * @param {function} spawnFn - The provider.spawn function
- * @param {object} options - { label, logDir, ticketKey }
- * @returns {Promise<{output, completedNormally, exitCode, numTurns, rateLimited, provider, duration}>}
+ * @param {object} options - { label, logDir, ticketKey, resumeSessionId }
+ * @returns {Promise<{output, completedNormally, exitCode, numTurns, rateLimited, provider, duration, sessionId}>}
  */
 export async function run(prompt, workingDir, modeConfig, adapters, spawnFn, options) {
   const providerName = modeConfig.provider || 'claude';
@@ -21,7 +21,10 @@ export async function run(prompt, workingDir, modeConfig, adapters, spawnFn, opt
     throw new Error(`Unknown provider: ${providerName}`);
   }
 
-  const providerConfig = modeConfig[providerName] || {};
+  const providerConfig = {
+    ...(modeConfig[providerName] || {}),
+    ...(options.resumeSessionId && { resumeSessionId: options.resumeSessionId }),
+  };
   const { args, timeout, maxTurns } = adapter.buildArgs(prompt, providerConfig);
 
   const raw = await spawnFn({
@@ -38,13 +41,5 @@ export async function run(prompt, workingDir, modeConfig, adapters, spawnFn, opt
 
   const parsed = adapter.parseStreamOutput(raw.stdout, raw.exitCode);
 
-  return {
-    output: parsed.output,
-    completedNormally: parsed.completedNormally,
-    exitCode: raw.exitCode,
-    numTurns: parsed.numTurns,
-    rateLimited: isRateLimited(parsed.output) || adapter.isRateLimited(parsed.output),
-    provider: providerName,
-    duration: raw.duration,
-  };
+  return buildResult(raw, parsed, providerName, adapter);
 }
