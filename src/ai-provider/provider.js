@@ -30,10 +30,11 @@ import { log, warn, debug } from '../utils/logger.js';
  * @param {string} [opts.ticketKey] - JIRA ticket key for log filenames
  * @param {string} [opts.provider] - Provider name for log filenames
  * @param {string} [opts.prompt] - Original prompt (written to log file)
+ * @param {string} [opts.artifactDir] - Artifact directory; when set, also write log to {artifactDir}/ai-calls/{label}.log
  * @param {function} [opts.onEvent] - Callback for each parsed JSON event
  * @returns {Promise<{stdout: string, stderr: string, exitCode: number, duration: number}>}
  */
-export function spawn({ command, args, workingDir, timeout, label, logDir, ticketKey, provider, prompt, onEvent }) {
+export function spawn({ command, args, workingDir, timeout, label, logDir, ticketKey, provider, prompt, artifactDir, onEvent }) {
   log(`[${label}] Spawning ${command} (timeout=${Math.round(timeout / 60000)}min)...`);
   debug(`[${label}] Working directory: ${workingDir}`);
 
@@ -141,7 +142,7 @@ export function spawn({ command, args, workingDir, timeout, label, logDir, ticke
 
       // Write log file
       if (logDir && ticketKey) {
-        writeLogFile({ logDir, ticketKey, provider, label, code, elapsed, eventCount, prompt, rawStdout });
+        writeLogFile({ logDir, ticketKey, provider, label, code, elapsed, eventCount, prompt, rawStdout, artifactDir });
       }
 
       resolve({
@@ -163,28 +164,41 @@ export function spawn({ command, args, workingDir, timeout, label, logDir, ticke
 /**
  * Write run output to a log file.
  */
-function writeLogFile({ logDir, ticketKey, provider, label, code, elapsed, eventCount, prompt, rawStdout }) {
-  try {
-    if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const providerTag = provider ? `-${provider}` : '';
-    const logFile = path.join(logDir, `${ticketKey}-${label}${providerTag}-${timestamp}.log`);
-    const logContent = [
-      `=== RUN INFO ===`,
-      `Ticket: ${ticketKey}`,
-      `Pass: ${label}`,
-      `Provider: ${provider || 'unknown'}`,
-      `Exit Code: ${code}`,
-      `Duration: ${elapsed}s`,
-      `Events: ${eventCount}`,
-      ``,
-      ...(prompt ? [`=== PROMPT ===`, prompt, ``] : []),
-      `=== STDOUT ===`,
-      rawStdout || '(empty)',
-    ].join('\n');
-    fs.writeFileSync(logFile, logContent);
-    log(`[${label}] Output saved to ${logFile}`);
-  } catch { /* non-critical */ }
+function writeLogFile({ logDir, ticketKey, provider, label, code, elapsed, eventCount, prompt, rawStdout, artifactDir }) {
+  const logContent = [
+    `=== RUN INFO ===`,
+    `Ticket: ${ticketKey}`,
+    `Pass: ${label}`,
+    `Provider: ${provider || 'unknown'}`,
+    `Exit Code: ${code}`,
+    `Duration: ${elapsed}s`,
+    `Events: ${eventCount}`,
+    ``,
+    ...(prompt ? [`=== PROMPT ===`, prompt, ``] : []),
+    `=== STDOUT ===`,
+    rawStdout || '(empty)',
+  ].join('\n');
+
+  if (artifactDir) {
+    // Write to unified artifact directory
+    try {
+      const aiCallsDir = path.join(artifactDir, 'ai-calls');
+      if (!fs.existsSync(aiCallsDir)) fs.mkdirSync(aiCallsDir, { recursive: true });
+      const artifactLogFile = path.join(aiCallsDir, `${label}.log`);
+      fs.writeFileSync(artifactLogFile, logContent);
+      log(`[${label}] Output saved to ${artifactLogFile}`);
+    } catch { /* non-critical */ }
+  } else if (logDir) {
+    // No artifact dir (e.g. dry-run) — write to logDir
+    try {
+      if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const providerTag = provider ? `-${provider}` : '';
+      const logFile = path.join(logDir, `${ticketKey}-${label}${providerTag}-${timestamp}.log`);
+      fs.writeFileSync(logFile, logContent);
+      log(`[${label}] Output saved to ${logFile}`);
+    } catch { /* non-critical */ }
+  }
 }
 
 /**

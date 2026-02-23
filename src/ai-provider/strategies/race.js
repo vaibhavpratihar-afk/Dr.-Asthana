@@ -101,6 +101,7 @@ async function runProvider(providerName, prompt, workingDir, modeConfig, adapter
     ticketKey: options.ticketKey,
     provider: providerName,
     prompt,
+    artifactDir: options.artifactDir,
   });
 
   const parsed = adapter.parseStreamOutput(raw.stdout, raw.exitCode);

@@ -90,6 +90,10 @@ export function getRunLogPath() {
   return runLogPath;
 }
 
+export function getRunLogPaths() {
+  return { runLog: runLogPath, errorLog: errorLogPath };
+}
+
 export function setDebugMode(enabled) {
   debugMode = enabled;
 }

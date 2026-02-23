@@ -67,11 +67,12 @@ src/
     transitions.js        → JIRA CLI operations via jira-cli.mjs (transitions, comments, search, labels)
     validator.js          → Pre-processing ticket validation (required fields, scope checks)
   notification/
-    index.js              → Public API: postJiraStep, postFinalJiraReport, notifySlack*, uploadLogFile
+    index.js              → Public API: postJiraStep, postFinalJiraReport, notifySlack*
     report.js             → Report builders (JIRA ADF comments, Slack Block Kit messages)
     slack.js              → Slack WebClient DM sender
   pipeline/
     index.js              → Pipeline orchestrator (runPipeline, resume)
+    bundler.js            → Run artifact bundler (tar + upload to Pixelbin CDN)
     checkpoint.js         → Checkpoint persistence (.pipeline-state/<ticketKey>/)
     steps.js              → Step definitions (FETCH_TICKET through NOTIFY)
   prompt/
@@ -274,7 +275,7 @@ All JIRA write operations route through `jira-cli.mjs` via `jira/transitions.js`
 ## Notifications
 - **JIRA:** Structured ADF comment with PR table, summary, and failure panels.
 - **Slack:** DM to configured user with all PR links and summary.
-- **Run Log:** Uploaded to Pixelbin CDN via `uploadLogFile()`. URL included in JIRA/Slack.
+- **Run Artifact:** At end of run, `.pipeline-state/{ticketKey}/` is bundled into a `.tar.gz` and uploaded to Pixelbin CDN via `bundleRunArtifact()`. URL included in JIRA/Slack.
 - **Length limits:** Summarized via `utils/summariser.js` (`aisum` with presets). Hard truncation only as fallback.
 
 ## Azure DevOps PR Creation
@@ -295,19 +296,43 @@ Key sections:
 ## Logging
 - Run-level logging: each ticket run gets a unique ID, logs to `logs/YYYY-MM-DD/{runId}.log`.
 - Step tracking with durations (startStep/endStep).
-- AI pass outputs saved to `logs/{ticketKey}-{label}-{provider}-{timestamp}.log`.
+- AI pass outputs saved to `.pipeline-state/{ticketKey}/ai-calls/{label}.log`.
 - Council round artifacts saved to `.pipeline-state/<label>/council/round-N/`.
 - Console output with ANSI colors; file output strips colors.
 
 ## Artifacts
+
+All run output is consolidated under `.pipeline-state/{ticketKey}/` — one directory per ticket run:
+
+```
+.pipeline-state/{ticketKey}/
+├── run.log                          ← Main run log (copied from logs/ at end)
+├── run.errors.log                   ← Error-only log (copied from logs/ at end)
+├── ai-calls/                        ← Per-AI-call logs
+│   ├── council-r1-agent-0.log
+│   ├── council-r1-agent-1.log
+│   ├── evaluator-0.log
+│   └── execute-attempt-1.log
+├── council/                         ← Council workspace: round artifacts, status, human feedback
+│   ├── status.md
+│   ├── round-1/
+│   │   ├── agent-0-proposal.md
+│   │   ├── agent-1-critique.md
+│   │   ├── agreement.md
+│   │   └── evaluation.md
+│   └── human-feedback.md
+├── cheatsheet.md                    ← Persisted cheatsheet (survives retries)
+└── state.json                       ← Pipeline checkpoint for resume
+```
+
+At the end of a run (step 8), the directory is bundled into a `.tar.gz` and uploaded to Pixelbin CDN as a single artifact. The CDN URL is included in JIRA comments and Slack DMs.
+
 | Location | Purpose |
 |----------|---------|
 | `.tmp/agent-*` | Cloned repos (cleaned up after each service branch) |
-| `.pipeline-state/<ticketKey>/state.json` | Pipeline checkpoint for resume |
-| `.pipeline-state/<ticketKey>/cheatsheet.md` | Persisted cheatsheet (survives retries) |
-| `.pipeline-state/<ticketKey>/council/` | Council workspace: round artifacts, status, human feedback |
-| `logs/YYYY-MM-DD/<runId>.log` | Full run log |
-| `logs/YYYY-MM-DD/<runId>.errors.log` | Error-only log |
+| `.pipeline-state/<ticketKey>/` | Unified run artifact (see structure above) |
+| `logs/YYYY-MM-DD/<runId>.log` | Console run log (copied into artifact dir at end) |
+| `logs/YYYY-MM-DD/<runId>.errors.log` | Error log (copied into artifact dir at end) |
 
 ## Module Boundaries
 Every module's `index.js` is the ONLY public interface. Internal files are private. Cross-module imports must go through `index.js`.

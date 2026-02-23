@@ -50,6 +50,7 @@ const STRATEGIES = {
  */
 export async function runAI(options) {
   const { prompt, workingDir, mode, label, logDir, ticketKey, config, providerConfig, resumeSessionId } = options;
+  const artifactDir = config._artifactDir || null;
 
   // --- Per-call provider override: bypass strategy entirely ---
   if (providerConfig) {
@@ -81,6 +82,7 @@ export async function runAI(options) {
       ticketKey,
       provider: providerName,
       prompt,
+      artifactDir,
     });
 
     const parsed = adapter.parseStreamOutput(raw.stdout, raw.exitCode);
@@ -113,6 +115,7 @@ export async function runAI(options) {
     ticketKey,
     mode,
     resumeSessionId,
+    artifactDir,
   });
 
   log(`[${label}] runAI complete: provider=${result.provider}, exit=${result.exitCode}, duration=${Math.floor(result.duration / 1000)}s, output=${result.output?.length || 0} chars${result.sessionId ? `, session=${result.sessionId.substring(0, 8)}...` : ''}`);

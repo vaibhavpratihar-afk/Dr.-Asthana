@@ -14,7 +14,6 @@ import {
   buildFailureReport,
   buildInProgressComment,
   buildLeadReviewComment,
-  uploadLogFile,
 } from './report.js';
 import { log, warn } from '../utils/logger.js';
 
@@ -33,9 +32,9 @@ export async function postJiraStep(ticketKey, stepName, details) {
 /**
  * Post the final JIRA report with PR table and summary.
  */
-export async function postFinalJiraReport(config, ticketKey, allPRs, allFailures, cheatsheetSummary, logUrl) {
+export async function postFinalJiraReport(config, ticketKey, allPRs, allFailures, cheatsheetSummary, artifactUrl) {
   try {
-    const report = buildFinalReport(config, allPRs, allFailures, cheatsheetSummary, logUrl);
+    const report = buildFinalReport(config, allPRs, allFailures, cheatsheetSummary, artifactUrl);
     await postComment(ticketKey, report.jira);
   } catch (error) {
     warn(`Failed to post final JIRA report for ${ticketKey}: ${error.message}`);
@@ -45,8 +44,8 @@ export async function postFinalJiraReport(config, ticketKey, allPRs, allFailures
 /**
  * Send Slack success notification with all PRs.
  */
-export async function notifySlackSuccess(config, ticketKey, summary, allPRs, allFailures, cheatsheetSummary, logUrl) {
-  const report = buildFinalReport(config, allPRs, allFailures, cheatsheetSummary, logUrl);
+export async function notifySlackSuccess(config, ticketKey, summary, allPRs, allFailures, cheatsheetSummary, artifactUrl) {
+  const report = buildFinalReport(config, allPRs, allFailures, cheatsheetSummary, artifactUrl);
   if (report.slack) {
     // Add ticket context to slack blocks
     const ticketBlock = {
@@ -65,8 +64,8 @@ export async function notifySlackSuccess(config, ticketKey, summary, allPRs, all
 /**
  * Send Slack failure notification.
  */
-export async function notifySlackFailure(config, ticketKey, ticketData, error, logUrl) {
-  const report = buildFailureReport(error, 'pipeline', ticketData, logUrl);
+export async function notifySlackFailure(config, ticketKey, ticketData, error, artifactUrl) {
+  const report = buildFailureReport(error, 'pipeline', ticketData, artifactUrl);
   if (report.slack) {
     await sendDM(config, report.slack, `Dr. Asthana failed for ${ticketKey}: ${typeof error === 'string' ? error : error.message}`);
   }
@@ -112,5 +111,3 @@ export async function postLeadReviewComment(config, ticketKey, allPRs, cheatshee
     warn(`Failed to post lead review comment: ${error.message}`);
   }
 }
-
-export { uploadLogFile } from './report.js';

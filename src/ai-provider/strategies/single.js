@@ -37,6 +37,7 @@ export async function run(prompt, workingDir, modeConfig, adapters, spawnFn, opt
     ticketKey: options.ticketKey,
     provider: providerName,
     prompt,
+    artifactDir: options.artifactDir,
   });
 
   const parsed = adapter.parseStreamOutput(raw.stdout, raw.exitCode);

@@ -25,14 +25,14 @@ import {
   notifySlackRejection,
   postInProgressComment,
   postLeadReviewComment,
-  uploadLogFile,
 } from '../notification/index.js';
 import { startServices, stopServices } from '../infra/index.js';
 import { saveCheckpoint, loadCheckpoint, clearCheckpoint, getCheckpointPath } from './checkpoint.js';
+import { bundleRunArtifact } from './bundler.js';
 import { STEPS, STEP_ORDER, getStepNumber } from './steps.js';
 import * as logger from '../utils/logger.js';
 
-const { log, ok, warn, err, debug, logData, startStep, endStep, initRun, finalizeRun, getRunLogPath } = logger;
+const { log, ok, warn, err, debug, logData, startStep, endStep, initRun, finalizeRun, getRunLogPaths } = logger;
 
 /**
  * Run the full pipeline for a ticket.
@@ -59,6 +59,12 @@ export async function runPipeline(config, ticketOrKey) {
     displayTicketDetails(ticket, logger);
     saveCheckpoint(ticketKey, STEPS.FETCH_TICKET, { ticketData: ticket });
     endStep(true, `Ticket fetched: ${ticket.summary.substring(0, 50)}...`);
+
+    // Set artifact directory so downstream modules write AI call logs there
+    const artifactDir = getCheckpointPath(ticketKey);
+    config._artifactDir = artifactDir;
+    const aiCallsDir = path.join(artifactDir, 'ai-calls');
+    if (!fs.existsSync(aiCallsDir)) fs.mkdirSync(aiCallsDir, { recursive: true });
 
     // ══════ Step 2: VALIDATE_TICKET ══════
     startStep(2, 'Validate ticket fields');
@@ -122,12 +128,16 @@ export async function runPipeline(config, ticketOrKey) {
 
     // ══════ Step 8: NOTIFY ══════
     startStep(8, 'Update JIRA and send notifications');
-    const logUrl = uploadLogFile(getRunLogPath());
+
+    // Bundle run artifact: copy run logs into artifact dir, tar, upload
+    const runLogPaths = getRunLogPaths();
+    const bundle = await bundleRunArtifact(ticketKey, artifactDir, runLogPaths);
+    const artifactUrl = bundle.url || null;
 
     if (allPRs.length === 0) {
       warn('No PRs created across any service/branch');
-      const noPrMsg = logUrl
-        ? `Dr. Asthana: No PRs created. Manual implementation may be needed.\n\nRun Log: ${logUrl}`
+      const noPrMsg = artifactUrl
+        ? `Dr. Asthana: No PRs created. Manual implementation may be needed.\n\nRun Artifact: ${artifactUrl}`
         : 'Dr. Asthana: No PRs created. Manual implementation may be needed.';
       await postComment(ticketKey, noPrMsg);
       endStep(false, 'No PRs created');
@@ -146,7 +156,7 @@ export async function runPipeline(config, ticketOrKey) {
     }
 
     // Post final JIRA comment
-    await postFinalJiraReport(config, ticketKey, allPRs, allFailures, cheatsheetSummary, logUrl);
+    await postFinalJiraReport(config, ticketKey, allPRs, allFailures, cheatsheetSummary, artifactUrl);
 
     // Update labels
     await removeLabel(ticketKey, config.jira.label);
@@ -157,7 +167,7 @@ export async function runPipeline(config, ticketOrKey) {
     await addLabel(ticketKey, processedLabel);
 
     // Slack notification
-    await notifySlackSuccess(config, ticketKey, ticket.summary, allPRs, allFailures, cheatsheetSummary, logUrl);
+    await notifySlackSuccess(config, ticketKey, ticket.summary, allPRs, allFailures, cheatsheetSummary, artifactUrl);
     endStep(true, 'JIRA comment and Slack notification sent');
 
     saveCheckpoint(ticketKey, STEPS.NOTIFY, { allPRs, allFailures });
@@ -172,12 +182,22 @@ export async function runPipeline(config, ticketOrKey) {
     err(`Error processing ${ticketKey}: ${error.message}`);
     err(`Stack trace: ${error.stack}`);
     try {
-      const logUrl = uploadLogFile(getRunLogPath());
-      const failMsg = logUrl
-        ? `Dr. Asthana failed: ${error.message}\n\nRun Log: ${logUrl}`
+      let failArtifactUrl = null;
+      try {
+        const failArtifactDir = config._artifactDir;
+        if (failArtifactDir) {
+          const failBundle = await bundleRunArtifact(ticketKey, failArtifactDir, getRunLogPaths());
+          failArtifactUrl = failBundle.url;
+        }
+      } catch (bundleErr) {
+        warn(`Artifact bundling failed in error handler: ${bundleErr.message}`);
+      }
+
+      const failMsg = failArtifactUrl
+        ? `Dr. Asthana failed: ${error.message}\n\nRun Artifact: ${failArtifactUrl}`
         : `Dr. Asthana failed: ${error.message}`;
       await postComment(ticketKey, failMsg);
-      await notifySlackFailure(config, ticketKey, { key: ticketKey, summary: ticketKey }, error, logUrl);
+      await notifySlackFailure(config, ticketKey, { key: ticketKey, summary: ticketKey }, error, failArtifactUrl);
     } catch (e) {
       err(`Failed to send failure notification: ${e.message}`);
     }

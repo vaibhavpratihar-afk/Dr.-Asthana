@@ -42,7 +42,7 @@ export function buildStepReport(stepName, details, timestamp) {
 /**
  * Build the final report with all PRs, summary, and failures.
  */
-export function buildFinalReport(config, allPRs, allFailures, cheatsheetSummary, logUrl) {
+export function buildFinalReport(config, allPRs, allFailures, cheatsheetSummary, artifactUrl) {
   const azdoBase = config.azureDevOps.org;
   const project = config.azureDevOps.project;
 
@@ -79,8 +79,8 @@ export function buildFinalReport(config, allPRs, allFailures, cheatsheetSummary,
     jiraLines.push('');
   }
 
-  if (logUrl) {
-    jiraLines.push(`**Run Log:** [View full run log](${logUrl})`);
+  if (artifactUrl) {
+    jiraLines.push(`**Run Artifact:** [View run artifact](${artifactUrl})`);
   }
 
   // --- Slack blocks ---
@@ -123,10 +123,10 @@ export function buildFinalReport(config, allPRs, allFailures, cheatsheetSummary,
     });
   }
 
-  if (logUrl) {
+  if (artifactUrl) {
     slackBlocks.push({
       type: 'context',
-      elements: [{ type: 'mrkdwn', text: `:page_facing_up: <${logUrl}|View full run log>` }],
+      elements: [{ type: 'mrkdwn', text: `:package: <${artifactUrl}|View run artifact>` }],
     });
   }
 
@@ -149,7 +149,7 @@ export function buildRejectionReport(reason, phase, ticketData) {
 /**
  * Build a failure report.
  */
-export function buildFailureReport(error, step, ticketData, logUrl) {
+export function buildFailureReport(error, step, ticketData, artifactUrl) {
   const errorSummary = summariseText(typeof error === 'string' ? error : error.message, {
     preset: 'slack-message',
     label: 'failure-error',
@@ -161,8 +161,8 @@ export function buildFailureReport(error, step, ticketData, logUrl) {
     `**Step:** ${step}`,
     `**Error:** ${errorSummary}`,
   ];
-  if (logUrl) {
-    jiraLines.push(`**Run Log:** [View full run log](${logUrl})`);
+  if (artifactUrl) {
+    jiraLines.push(`**Run Artifact:** [View run artifact](${artifactUrl})`);
   }
 
   const slackBlocks = [
@@ -177,9 +177,9 @@ export function buildFailureReport(error, step, ticketData, logUrl) {
         text: `*Ticket:* ${ticketData.key}\n*Summary:* ${ticketData.summary}\n*Error:*\n\`\`\`${errorSummary}\`\`\``,
       },
     },
-    ...(logUrl ? [{
+    ...(artifactUrl ? [{
       type: 'context',
-      elements: [{ type: 'mrkdwn', text: `:page_facing_up: <${logUrl}|View full run log>` }],
+      elements: [{ type: 'mrkdwn', text: `:package: <${artifactUrl}|View run artifact>` }],
     }] : []),
     {
       type: 'context',
