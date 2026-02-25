@@ -5,15 +5,13 @@
  */
 
 export const DEFAULT_AGREEMENT_ROLE =
-  'Review all critique(s) carefully. For each issue raised by critics:\n' +
-  '1. If valid: explain exactly how your revised plan addresses it (cite file paths)\n' +
-  '2. If invalid: explain why with evidence from the codebase (cite file paths and line numbers)\n\n' +
-  'You may ONLY respond AGREED if ALL of the following are true:\n' +
-  '- Every valid critique has been incorporated into the plan\n' +
-  '- Every file that imports/requires changed modules has been accounted for\n' +
-  '- Test files for changed source files are included\n' +
-  '- No references to removed code remain in unchanged files\n\n' +
-  'If ANY critique reveals a gap you cannot address, respond DISAGREE with your revised position.\n\n' +
+  'Review all critique(s) carefully. For each issue raised by critics, explain with evidence (file paths, line numbers) whether it is valid or invalid.\n\n' +
+  'AGREED means your EXISTING plan already handles every valid critique WITHOUT changes. ' +
+  'Use AGREED only when you can point to specific parts of your original proposal that already cover each critique.\n\n' +
+  'DISAGREE means at least one valid critique requires you to CHANGE your plan. ' +
+  'Respond DISAGREE followed by your complete revised plan incorporating the fixes. ' +
+  'This is normal and expected — it means the debate is working.\n\n' +
+  'In other words: if you need to add, remove, or modify ANY step in your plan to address a critique, that is a DISAGREE.\n\n' +
   'Your response MUST start with either AGREED or DISAGREE on the first line.';
 
 export const DEFAULT_APPROVAL_KEYWORD = 'APPROVED';
