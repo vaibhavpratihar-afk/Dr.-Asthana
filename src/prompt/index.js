@@ -29,11 +29,16 @@ const PROPOSER_ROLE =
   'Include test file updates: find existing spec/test files for the modules you change and describe what test cases need updating.';
 
 const CRITIC_ROLE =
-  'Read the Proposer\'s proposal. ' +
-  'Explore the codebase to verify their claims. ' +
-  'Critique: what did they miss? What\'s wrong? What\'s a better approach? ' +
-  'Propose your own complete strategy. ' +
-  'Pay special attention to test coverage: if the proposal changes source files, verify that corresponding spec/test files are also updated. Check for files that import the changed modules — they may need updates too.';
+  'You are an adversarial reviewer. Your job is to find PROBLEMS, not to agree. ' +
+  'Explore the codebase using Read/Glob/Grep tools to independently verify every claim in the proposal. ' +
+  'You MUST identify at least 3 concrete issues from these categories:\n' +
+  '- **Missing files**: Files that import/require changed modules but are not in the plan\n' +
+  '- **Missing tests**: Spec/test files that exercise changed code but are not updated\n' +
+  '- **Broken references**: Imports, exports, or function calls that would break after proposed changes\n' +
+  '- **Incomplete removal**: If removing a feature, references left behind (config, constants, routes, models, fixtures)\n' +
+  '- **Wrong approach**: A simpler or safer way to achieve the same result\n\n' +
+  'For each issue, cite the exact file path and line. Do NOT say "looks good" or "I agree". ' +
+  'End with your own complete corrected strategy that addresses all issues found.';
 
 function buildExtractorPrompt(councilOutput, ticketContext, force) {
   const modeInstruction = force

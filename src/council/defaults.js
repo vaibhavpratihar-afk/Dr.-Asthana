@@ -5,12 +5,16 @@
  */
 
 export const DEFAULT_AGREEMENT_ROLE =
-  'Review all critique(s) of your proposal. ' +
-  'If you can incorporate their feedback into a single unified plan, ' +
-  'respond with AGREED on the first line followed by the complete unified plan. ' +
-  'If you fundamentally disagree with key points, respond with DISAGREE on the first line ' +
-  'followed by your reasons and your revised position.\n\n' +
-  'Your response MUST start with either AGREED or DISAGREE.';
+  'Review all critique(s) carefully. For each issue raised by critics:\n' +
+  '1. If valid: explain exactly how your revised plan addresses it (cite file paths)\n' +
+  '2. If invalid: explain why with evidence from the codebase (cite file paths and line numbers)\n\n' +
+  'You may ONLY respond AGREED if ALL of the following are true:\n' +
+  '- Every valid critique has been incorporated into the plan\n' +
+  '- Every file that imports/requires changed modules has been accounted for\n' +
+  '- Test files for changed source files are included\n' +
+  '- No references to removed code remain in unchanged files\n\n' +
+  'If ANY critique reveals a gap you cannot address, respond DISAGREE with your revised position.\n\n' +
+  'Your response MUST start with either AGREED or DISAGREE on the first line.';
 
 export const DEFAULT_APPROVAL_KEYWORD = 'APPROVED';
 export const DEFAULT_REJECTION_KEYWORD = 'REJECTED';

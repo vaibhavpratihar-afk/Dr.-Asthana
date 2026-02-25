@@ -14,8 +14,8 @@ JIRA Ticket
 │                                                             │
 │  Round 1..N:                                                │
 │    Proposer → explores codebase, proposes strategy          │
-│    Critics  → challenge, verify claims, find gaps           │
-│    Agreement → AGREED (unified plan) or DISAGREE (retry)    │
+│    Critics  → adversarial review, must find 3+ issues       │
+│    Agreement → AGREED (all critiques addressed) or DISAGREE │
 │                                                             │
 │  All discussions written to files for full visibility.      │
 │  Agents have session memory — no rework across rounds.      │
@@ -30,7 +30,7 @@ JIRA Ticket
 │  Follows cheatsheet exactly. No planning. No decisions.     │
 └─────────────────────────────────────────────────────────────┘
     ↓
-Validate → Commit → Push → PR on Azure DevOps
+Validate (critical/warnings) → Diff Review → Commit → Push → PR on Azure DevOps
 ```
 
 The **cheatsheet** is the most valuable artifact. It's persisted to disk so failed executions can retry without re-running the council.
@@ -70,12 +70,13 @@ src/
     ticket-context.js     → Ticket data → markdown context
     codebase-context.js   → Clone analysis → markdown context
     static.js             → Executor guardrails (no git, no docker, follow cheatsheet)
-    validator.js          → Post-execution validation (diff, alignment, debug logs)
+    validator.js          → Post-execution validation (critical/warnings) + structural diff review
   service/                → Git operations, Azure DevOps PR creation, base image tagger
   utils/                  → Config loader, logger (run/step tracking), AI summariser
 agent-rules-with-tests.md → Rules injected into clone when tests enabled
 agent-rules-no-tests.md   → Rules injected when tests handled externally
 config.json               → Runtime configuration
+clean.sh                  → Cleanup utility: ./clean.sh (all) or ./clean.sh <KEY> (specific ticket)
 ```
 
 ## How It Works
@@ -86,11 +87,11 @@ config.json               → Runtime configuration
 4. **Transitions ticket to In-Progress** and posts a JIRA comment with scope details.
 5. For each affected service x target branch:
    a. Clones the repo, creates a feature branch, injects agent rules.
-   b. **Council phase** — a proposer agent explores the codebase and proposes strategy; critic agents challenge and verify (read-only tools only). Agents discuss via files with session memory. Runs 1-3 rounds until convergence or max rounds.
+   b. **Council phase** — a proposer explores the codebase; adversarial critics must find 3+ concrete issues (missing files/tests, broken refs, incomplete removal). Agreement requires all valid critiques addressed. Runs 1-3 rounds.
    c. **Evaluate** — quality gate runs structural pre-checks + AI evaluator, extracts a clean cheatsheet.
    d. **Execute** — cheap model follows the cheatsheet exactly (static prompt + guardrails).
-   e. **Validate** — checks git diff non-empty, changed files align with cheatsheet, no leftover debug logs.
-   f. Commits, pushes (force if needed), handles base image tagging, opens a PR on Azure DevOps.
+   e. **Validate** — critical issues (empty diff, missing tests, <50% completion) trigger retry. Warnings (broken imports, TODO/FIXME) flagged in PR. Structural diff review catches invalid JSON, dangling references.
+   f. Commits, pushes (force if needed), handles base image tagging, opens a PR on Azure DevOps (cheatsheet summary + diff stats + validation warnings in description, capped at 4000 chars).
 6. **Transitions ticket to LEAD REVIEW** (if PRs were created).
 7. Posts final JIRA comment with PR table, sends Slack DM, uploads run log to CDN, updates labels.
 

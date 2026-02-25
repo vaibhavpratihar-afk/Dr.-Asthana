@@ -80,7 +80,7 @@ export function extractFilePaths(text) {
  * Read referenced files from the clone and format as context.
  * Skips files that don't exist or are too large.
  */
-function buildReferencedFilesContext(cloneDir, filePaths, maxPerFile = 8000, maxTotal = 60000) {
+function buildReferencedFilesContext(cloneDir, filePaths, maxPerFile = 2000, maxTotal = 40000) {
   if (!filePaths || filePaths.length === 0) return '';
 
   const lines = [];

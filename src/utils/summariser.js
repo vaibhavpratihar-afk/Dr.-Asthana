@@ -48,7 +48,7 @@ export function summariseText(text, { preset, limit, label = 'text' } = {}) {
     'jira-comment': 32000,
     'slack-message': 4000,
     'pr-title': 120,
-    'pr-description': 6000,
+    'pr-description': 2500,
   };
   const effectiveLimit = limit || (preset ? PRESET_LIMITS[preset] : null);
 

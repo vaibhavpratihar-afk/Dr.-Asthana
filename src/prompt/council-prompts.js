@@ -36,14 +36,16 @@ export function buildCriticPrompt(round, baseContext, proposerOutput, criticOutp
     return `${baseContext}\n\n` +
       '## Proposer\'s Proposal\n' + proposerOutput +
       priorCritiques + '\n\n' +
-      `You are Critic ${criticIndex} (agent-${criticIndex}). ${criticRole}`;
+      `You are Critic ${criticIndex} (agent-${criticIndex}). ${criticRole}\n\n` +
+      'IMPORTANT: Do NOT just agree with the proposal. Your value is in finding what\'s WRONG or MISSING.';
   }
 
   return `${baseContext}\n\n` +
     '## Proposer\'s Latest Proposal\n' + proposerOutput +
     priorCritiques + '\n\n' +
-    `You are Critic ${criticIndex} (agent-${criticIndex}). The Proposer responded to previous critiques. ` +
-    'Continue refining. Focus on producing a final actionable output.';
+    `You are Critic ${criticIndex} (agent-${criticIndex}). ${criticRole}\n\n` +
+    'The Proposer responded to previous critiques. Verify their fixes are correct. ' +
+    'Find any remaining issues. Do NOT agree unless you have independently verified their claims in the codebase.';
 }
 
 export function buildAgreementPrompt(baseContext, proposerOutput, criticOutputs, agreementRole) {

@@ -95,6 +95,7 @@ src/
 agent-rules-with-tests.md  → Standing rules injected into clone's CLAUDE.md when tests enabled
 agent-rules-no-tests.md    → Standing rules injected when tests handled externally
 config.json                → Runtime configuration (JIRA, Azure DevOps, services, Slack, aiProvider)
+clean.sh                   → Cleanup utility: ./clean.sh (all) or ./clean.sh <KEY> (specific ticket)
 ```
 
 ## Core Architecture: Council-then-Execute
@@ -102,7 +103,7 @@ config.json                → Runtime configuration (JIRA, Azure DevOps, servic
 The system separates **thinking** from **doing**: expensive models collaborate in a council to produce a plan, then a cheap model executes it.
 
 ### 1. Council (expensive models)
-A group of AI agents collaborate via file-based discussions to produce an actionable output. A proposer explores the codebase and proposes a strategy, critic agents challenge and verify claims, then the proposer synthesizes critiques into a unified plan (AGREED/DISAGREE protocol). Runs 1-3 rounds until convergence. All discussions are persisted to disk for full visibility. Human feedback can be injected mid-council via a `human-feedback.md` file. Agents maintain session memory across rounds to avoid re-reading the codebase.
+A group of AI agents collaborate via file-based discussions to produce an actionable output. A proposer explores the codebase and proposes a strategy. Adversarial critics must independently verify claims in the codebase and find at least 3 concrete issues (missing files, missing tests, broken references, incomplete removal, wrong approach). The proposer then synthesizes critiques into a unified plan (AGREED/DISAGREE protocol) — AGREED requires all valid critiques addressed, all importing files accounted for, test files included, and no dangling references. Runs 1-3 rounds until convergence. All discussions are persisted to disk for full visibility. Human feedback can be injected mid-council via a `human-feedback.md` file. Agents maintain session memory across rounds to avoid re-reading the codebase.
 
 ### 2. Evaluate (configurable quality gate)
 Structural pre-checks (fast, no API calls: minimum length, file paths, action verbs) followed by an AI evaluator that judges the council output and extracts a clean artifact between configurable markers. Approval/rejection keywords and extraction markers are defined by the caller.
@@ -180,9 +181,9 @@ Owns all prompt construction across the pipeline. For the council, it provides t
 - `buildCheatsheet()` — builds ticket + codebase context, configures a council with ticket-specific roles and evaluation, runs it, returns the cheatsheet
 - `council-prompts.js` — prompt builders passed into `createCouncil()` (proposer, critic, agreement phase prompts)
 - `ticket-context.js` — converts parsed ticket data into markdown context
-- `codebase-context.js` — reads CLAUDE.md/CODEX.md, file tree, package.json from clone
+- `codebase-context.js` — reads CLAUDE.md/CODEX.md, file tree, package.json from clone. Pre-loads referenced files as 2K previews (40K total budget) — agents read full files on demand via tools.
 - `static.js` — executor rules (follow cheatsheet exactly, no git/docker/deploy)
-- `validator.js` — post-execution checks (git diff non-empty, changed files align with cheatsheet, no leftover debug logs)
+- `validator.js` — post-execution validation: empty diff (critical), cheatsheet step completeness (critical if <50% or test files missing), broken imports (warning), debug logs (warning). Also provides `reviewDiff()` for structural diff review (TODO/FIXME, JSON validity, broken imports). Returns `{valid, issues, critical, warnings}`.
 
 ## AI Provider Module (`src/ai-provider/`)
 Single interface for all AI CLI spawning. No other module spawns `claude` or `codex` directly. Handles process lifecycle, streaming JSON parsing, timeout, heartbeat monitoring, and log capture.
@@ -216,8 +217,8 @@ Steps 3-7: For each service × branch (fully sequential, isolated clones):
   Step 3: CLONE_REPO — shallow clone, create feature branch, inject agent rules
   Step 4: BUILD_CHEATSHEET — council deliberation → quality gate → extract cheatsheet
   Step 5: EXECUTE — cheap model follows cheatsheet (static prompt + guardrails)
-  Step 6: VALIDATE_EXECUTION — git diff non-empty, files align, no debug logs
-  Step 7: SHIP — commit, push (force if needed), base tag if applicable, create PR
+  Step 6: VALIDATE_EXECUTION — critical issues (empty diff, missing tests, <50% completion) trigger retry; warnings (broken imports, debug logs, TODO/FIXME) flagged in PR. Includes structural diff review.
+  Step 7: SHIP — commit, push (force if needed), base tag if applicable, create PR (cheatsheet + validation warnings in description)
 Step 8:   NOTIFY — JIRA final report, Slack DM, log upload, label updates, transition
 ```
 
@@ -245,11 +246,11 @@ Two-layer architecture: `client.js` handles read-only REST API calls (fetch tick
 Git operations, Azure DevOps PR creation, and base image tagging.
 
 - **Git** (`git.js`): Shallow clone (`--depth=50`), feature branch creation, agent rules injection (CLAUDE.md/CODEX.md restored before commit), force push on branch conflict.
-- **Azure DevOps** (`azure.js`): PR creation via `az repos pr create`. Handles TF401179 (PR already exists) by finding and returning the existing PR.
+- **Azure DevOps** (`azure.js`): PR creation via `az repos pr create`. PR description built from summarised cheatsheet (2500 char limit) + `git diff --stat` + validation warnings. Hard-capped at 4000 chars (Azure DevOps limit). Handles TF401179 (PR already exists) by finding and returning the existing PR.
 - **Base Tagger** (`base-tagger.js`): Auto-detected from Dockerfile. Creates `deploy.base.vMAJOR-MINOR-PATCH-BUILD` tags when `package.json`/`package-lock.json` change. Requires: Dockerfile with base-images registry FROM, Dockerfile.base, and azure-pipelines.yml.
 
 ## Notification Module (`src/notification/`)
-JIRA comments (structured ADF with PR tables, summary panels, failure panels), Slack DMs (Block Kit messages with PR links), and run log upload to Pixelbin CDN. All long content auto-summarized via `utils/summariser.js` with presets (jira-comment: 32k chars, slack-message: 4k chars, pr-title: 120 chars). Hard truncation only as fallback.
+JIRA comments (structured ADF with PR tables, summary panels, failure panels), Slack DMs (Block Kit messages with PR links), and run log upload to Pixelbin CDN. All long content auto-summarized via `utils/summariser.js` with presets (jira-comment: 32k chars, slack-message: 4k chars, pr-title: 120 chars, pr-description: 2500 chars). Hard truncation only as fallback. All Slack mrkdwn fields sanitized via `sanitizeForSlack()` (strips control chars, caps at 3000 chars). Slack `sendDM()` retries with plain text fallback on `invalid_blocks` errors.
 
 ## Git Operations
 - Feature branches: `feature/{ticketKey}-{sanitized-summary}` (single branch) or `feature/{ticketKey}-{sanitized-summary}-{version}` (multi-branch).
@@ -296,7 +297,7 @@ Key sections:
 ## Logging
 - Run-level logging: each ticket run gets a unique ID, logs to `logs/YYYY-MM-DD/{runId}.log`.
 - Step tracking with durations (startStep/endStep).
-- AI pass outputs saved to `.pipeline-state/{ticketKey}/ai-calls/{label}.log`.
+- AI pass logs saved to `.pipeline-state/{ticketKey}/ai-calls/{label}.log` — contains run info, full prompt (`=== PROMPT ===`), and human-readable agent output (`=== AGENT OUTPUT ===` with `[text]`, `[tool]`, `[exec]`, `[thinking]`, `[agent]`, `[result]` prefixes). Prompts are also written immediately as `.prompt.md` files when the process spawns.
 - Council round artifacts saved to `.pipeline-state/<label>/council/round-N/`.
 - Console output with ANSI colors; file output strips colors.
 

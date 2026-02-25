@@ -51,6 +51,7 @@ export function spawn({ command, args, workingDir, timeout, label, logDir, ticke
 
   const startTime = Date.now();
   let eventCount = 0;
+  const logSummaryLines = []; // Human-readable activity log for the log file
 
   const heartbeat = setInterval(() => {
     const elapsed = Math.floor((Date.now() - startTime) / 1000);
@@ -102,12 +103,15 @@ export function spawn({ command, args, workingDir, timeout, label, logDir, ticke
           for (const block of event.message.content) {
             if (block.type === 'text') {
               debug(`[${label}] Response text: ${block.text.substring(0, 200)}...`);
+              logSummaryLines.push(`[text] ${block.text}`);
             } else if (block.type === 'tool_use') {
               log(`[${label}] Tool: ${block.name}${block.input?.command ? ` — ${block.input.command.substring(0, 80)}` : ''}`);
+              logSummaryLines.push(`[tool] ${block.name}${block.input?.command ? `: ${block.input.command.substring(0, 200)}` : ''}`);
             }
           }
         } else if (event.type === 'result') {
           debug(`[${label}] Result event: cost=$${event.cost_usd ?? '?'}, duration=${event.duration_ms ?? '?'}ms, turns=${event.num_turns ?? '?'}`);
+          logSummaryLines.push(`[result] cost=$${event.cost_usd ?? '?'}, duration=${event.duration_ms ?? '?'}ms, turns=${event.num_turns ?? '?'}`);
         }
 
         // Codex --json JSONL events
@@ -115,15 +119,25 @@ export function spawn({ command, args, workingDir, timeout, label, logDir, ticke
           const item = event.item;
           switch (item.type) {
             case 'reasoning':
-              if (item.text) debug(`[${label}] thinking: ${item.text}`);
+              if (item.text) {
+                debug(`[${label}] thinking: ${item.text}`);
+                logSummaryLines.push(`[thinking] ${item.text}`);
+              }
               break;
             case 'agent_message':
-              if (item.text) log(`[${label}] agent: ${item.text.substring(0, 200)}${item.text.length > 200 ? '...' : ''}`);
+              if (item.text) {
+                log(`[${label}] agent: ${item.text.substring(0, 200)}${item.text.length > 200 ? '...' : ''}`);
+                logSummaryLines.push(`[agent] ${item.text}`);
+              }
               break;
             case 'command_execution': {
               if (item.command) {
                 const cmd = item.command.replace(/^\/bin\/zsh -lc '(.+)'$/, '$1');
                 log(`[${label}] exec: ${cmd.substring(0, 120)}${cmd.length > 120 ? '...' : ''}`);
+                logSummaryLines.push(`[exec] ${cmd}`);
+                if (item.aggregated_output) {
+                  logSummaryLines.push(item.aggregated_output.substring(0, 1000));
+                }
               }
               break;
             }
@@ -174,7 +188,7 @@ export function spawn({ command, args, workingDir, timeout, label, logDir, ticke
 
       // Write log file
       if (logDir && ticketKey) {
-        writeLogFile({ logDir, ticketKey, provider, label, code, elapsed, eventCount, prompt, rawStdout, artifactDir });
+        writeLogFile({ logDir, ticketKey, provider, label, code, elapsed, eventCount, prompt, logSummaryLines, artifactDir });
       }
 
       resolve({
@@ -196,7 +210,7 @@ export function spawn({ command, args, workingDir, timeout, label, logDir, ticke
 /**
  * Write run output to a log file.
  */
-function writeLogFile({ logDir, ticketKey, provider, label, code, elapsed, eventCount, prompt, rawStdout, artifactDir }) {
+function writeLogFile({ logDir, ticketKey, provider, label, code, elapsed, eventCount, prompt, logSummaryLines, artifactDir }) {
   const logContent = [
     `=== RUN INFO ===`,
     `Ticket: ${ticketKey}`,
@@ -207,8 +221,8 @@ function writeLogFile({ logDir, ticketKey, provider, label, code, elapsed, event
     `Events: ${eventCount}`,
     ``,
     ...(prompt ? [`=== PROMPT ===`, prompt, ``] : []),
-    `=== STDOUT ===`,
-    rawStdout || '(empty)',
+    `=== AGENT OUTPUT ===`,
+    logSummaryLines.length > 0 ? logSummaryLines.join('\n') : '(no output captured)',
   ].join('\n');
 
   if (artifactDir) {
