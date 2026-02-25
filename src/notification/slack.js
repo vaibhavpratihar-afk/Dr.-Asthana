@@ -25,13 +25,26 @@ export async function sendDM(config, blocks, fallbackText) {
     const conversation = await client.conversations.open({ users: config.slack.userId });
     const dmChannelId = conversation.channel.id;
 
-    await client.chat.postMessage({
-      channel: dmChannelId,
-      text: fallbackText,
-      blocks,
-    });
-
-    log('Slack notification sent');
+    try {
+      await client.chat.postMessage({
+        channel: dmChannelId,
+        text: fallbackText,
+        blocks,
+      });
+      log('Slack notification sent');
+    } catch (blockError) {
+      // If Block Kit is invalid, retry with plain text only
+      if (blockError.data?.error === 'invalid_blocks' || blockError.message?.includes('invalid_blocks')) {
+        warn(`Slack invalid_blocks error — retrying with plain text fallback`);
+        await client.chat.postMessage({
+          channel: dmChannelId,
+          text: fallbackText,
+        });
+        log('Slack notification sent (plain text fallback)');
+      } else {
+        throw blockError;
+      }
+    }
   } catch (error) {
     err(`Failed to send Slack notification: ${error.message}`);
   }

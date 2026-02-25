@@ -12,6 +12,40 @@ import { summariseText } from '../utils/summariser.js';
 import { execSync } from 'child_process';
 import { warn } from '../utils/logger.js';
 
+/** Max chars for a single Slack Block Kit mrkdwn text field. */
+const SLACK_MRKDWN_LIMIT = 3000;
+
+/**
+ * Sanitize text for Slack Block Kit mrkdwn fields.
+ * Strips control characters and truncates to the Block Kit limit.
+ */
+function sanitizeForSlack(text) {
+  if (!text) return '';
+  // Strip control chars except newline/tab
+  let clean = text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+  if (clean.length > SLACK_MRKDWN_LIMIT) {
+    clean = clean.substring(0, SLACK_MRKDWN_LIMIT - 3) + '...';
+  }
+  return clean;
+}
+
+/**
+ * Safely summarise text — wraps summariseText with try-catch.
+ * Falls back to hard truncation on failure.
+ */
+function safeSummarise(text, opts) {
+  try {
+    return summariseText(text, opts);
+  } catch (e) {
+    warn(`Summariser failed for ${opts?.label || 'text'}: ${e.message}. Using hard truncation.`);
+    const limit = opts?.limit || 3000;
+    if (text && text.length > limit) {
+      return text.substring(0, limit - 3) + '...';
+    }
+    return text || '';
+  }
+}
+
 /**
  * Upload a log file to Pixelbin CDN and return the URL.
  */
@@ -98,18 +132,18 @@ export function buildFinalReport(config, allPRs, allFailures, cheatsheetSummary,
 
   slackBlocks.push({
     type: 'section',
-    text: { type: 'mrkdwn', text: prLines.join('\n') },
+    text: { type: 'mrkdwn', text: sanitizeForSlack(prLines.join('\n')) },
   });
 
   if (cheatsheetSummary) {
-    const slackSummary = summariseText(cheatsheetSummary, {
+    const slackSummary = safeSummarise(cheatsheetSummary, {
       preset: 'slack-message',
       label: 'slack-final-summary',
     });
     slackBlocks.push({ type: 'divider' });
     slackBlocks.push({
       type: 'section',
-      text: { type: 'mrkdwn', text: `*What was done:* ${slackSummary}` },
+      text: { type: 'mrkdwn', text: sanitizeForSlack(`*What was done:* ${slackSummary}`) },
     });
   }
 
@@ -118,7 +152,7 @@ export function buildFinalReport(config, allPRs, allFailures, cheatsheetSummary,
       type: 'section',
       text: {
         type: 'mrkdwn',
-        text: `:warning: *Failed:* ${allFailures.map(f => `${f.service}/${f.baseBranch}`).join(', ')}`,
+        text: sanitizeForSlack(`:warning: *Failed:* ${allFailures.map(f => `${f.service}/${f.baseBranch}`).join(', ')}`),
       },
     });
   }
@@ -126,7 +160,7 @@ export function buildFinalReport(config, allPRs, allFailures, cheatsheetSummary,
   if (artifactUrl) {
     slackBlocks.push({
       type: 'context',
-      elements: [{ type: 'mrkdwn', text: `:package: <${artifactUrl}|View run artifact>` }],
+      elements: [{ type: 'mrkdwn', text: sanitizeForSlack(`:package: <${artifactUrl}|View run artifact>`) }],
     });
   }
 
@@ -150,7 +184,7 @@ export function buildRejectionReport(reason, phase, ticketData) {
  * Build a failure report.
  */
 export function buildFailureReport(error, step, ticketData, artifactUrl) {
-  const errorSummary = summariseText(typeof error === 'string' ? error : error.message, {
+  const errorSummary = safeSummarise(typeof error === 'string' ? error : error.message, {
     preset: 'slack-message',
     label: 'failure-error',
   });
@@ -174,12 +208,12 @@ export function buildFailureReport(error, step, ticketData, artifactUrl) {
       type: 'section',
       text: {
         type: 'mrkdwn',
-        text: `*Ticket:* ${ticketData.key}\n*Summary:* ${ticketData.summary}\n*Error:*\n\`\`\`${errorSummary}\`\`\``,
+        text: sanitizeForSlack(`*Ticket:* ${ticketData.key}\n*Summary:* ${ticketData.summary}\n*Error:*\n\`\`\`${errorSummary}\`\`\``),
       },
     },
     ...(artifactUrl ? [{
       type: 'context',
-      elements: [{ type: 'mrkdwn', text: `:package: <${artifactUrl}|View run artifact>` }],
+      elements: [{ type: 'mrkdwn', text: sanitizeForSlack(`:package: <${artifactUrl}|View run artifact>`) }],
     }] : []),
     {
       type: 'context',
@@ -201,7 +235,7 @@ export function buildInProgressComment(config, ticket) {
   lines.push('');
 
   if (ticket.description && ticket.description !== 'No description provided') {
-    const descriptionSummary = summariseText(ticket.description, {
+    const descriptionSummary = safeSummarise(ticket.description, {
       preset: 'jira-comment',
       label: 'in-progress-description',
     });
@@ -242,7 +276,7 @@ export function buildLeadReviewComment(config, allPRs, cheatsheetSummary) {
   if (cheatsheetSummary) {
     lines.push('#### Implementation Plan');
     lines.push('');
-    lines.push(summariseText(cheatsheetSummary, {
+    lines.push(safeSummarise(cheatsheetSummary, {
       preset: 'jira-comment',
       label: 'lead-review-plan',
     }));

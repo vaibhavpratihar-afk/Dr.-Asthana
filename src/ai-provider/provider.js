@@ -38,6 +38,17 @@ export function spawn({ command, args, workingDir, timeout, label, logDir, ticke
   log(`[${label}] Spawning ${command} (timeout=${Math.round(timeout / 60000)}min)...`);
   debug(`[${label}] Working directory: ${workingDir}`);
 
+  // Write prompt to file immediately so it's inspectable while the agent runs
+  if (artifactDir && prompt) {
+    try {
+      const aiCallsDir = path.join(artifactDir, 'ai-calls');
+      if (!fs.existsSync(aiCallsDir)) fs.mkdirSync(aiCallsDir, { recursive: true });
+      fs.writeFileSync(path.join(aiCallsDir, `${label}.prompt.md`), prompt);
+    } catch (err) {
+      warn(`[${label}] Failed to write prompt log file: ${err?.message || err}`);
+    }
+  }
+
   const startTime = Date.now();
   let eventCount = 0;
 
@@ -86,6 +97,7 @@ export function spawn({ command, args, workingDir, timeout, label, logDir, ticke
         if (onEvent) onEvent(event);
 
         // Standard logging for known event types
+        // Claude stream-json events
         if (event.type === 'assistant' && event.message?.content) {
           for (const block of event.message.content) {
             if (block.type === 'text') {
@@ -96,6 +108,26 @@ export function spawn({ command, args, workingDir, timeout, label, logDir, ticke
           }
         } else if (event.type === 'result') {
           debug(`[${label}] Result event: cost=$${event.cost_usd ?? '?'}, duration=${event.duration_ms ?? '?'}ms, turns=${event.num_turns ?? '?'}`);
+        }
+
+        // Codex --json JSONL events
+        if (event.type === 'item.completed' && event.item) {
+          const item = event.item;
+          switch (item.type) {
+            case 'reasoning':
+              if (item.text) debug(`[${label}] thinking: ${item.text}`);
+              break;
+            case 'agent_message':
+              if (item.text) log(`[${label}] agent: ${item.text.substring(0, 200)}${item.text.length > 200 ? '...' : ''}`);
+              break;
+            case 'command_execution': {
+              if (item.command) {
+                const cmd = item.command.replace(/^\/bin\/zsh -lc '(.+)'$/, '$1');
+                log(`[${label}] exec: ${cmd.substring(0, 120)}${cmd.length > 120 ? '...' : ''}`);
+              }
+              break;
+            }
+          }
         }
       }
     });

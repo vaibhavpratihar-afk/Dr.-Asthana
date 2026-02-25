@@ -15,7 +15,7 @@ import { getServiceConfig, getRepoUrl } from '../utils/config.js';
 import { cloneAndBranch, commitAndPush, cleanup } from '../service/index.js';
 import { createPR } from '../service/azure.js';
 import { handleBaseTag } from '../service/base-tagger.js';
-import { buildCheatsheet, validateExecution } from '../prompt/index.js';
+import { buildCheatsheet, validateExecution, reviewDiff } from '../prompt/index.js';
 import { execute } from '../agent/index.js';
 import {
   postJiraStep,
@@ -309,7 +309,8 @@ async function processServiceBranch(config, ticket, serviceConfig, repoUrl, tick
 
     // Step 5: EXECUTE (with retries)
     let executionResult;
-    const maxRetries = config.agent.executionRetries || 1;
+    let validationResult;
+    const maxRetries = config.agent.executionRetries || 2;
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       startStep(5, `Execute cheatsheet (attempt ${attempt}/${maxRetries})`);
@@ -333,17 +334,27 @@ async function processServiceBranch(config, ticket, serviceConfig, repoUrl, tick
 
       // Step 6: VALIDATE_EXECUTION
       startStep(6, 'Validate execution result');
-      const validationResult = await validateExecution(cheatsheet, tmpDir);
+      validationResult = await validateExecution(cheatsheet, tmpDir);
 
-      if (!validationResult.valid && attempt < maxRetries) {
-        warn(`Execution validation failed (attempt ${attempt}): ${validationResult.issues.join(', ')}`);
-        endStep(false, 'Validation failed, retrying...');
+      // Retry only on critical issues (not warnings)
+      if (validationResult.critical?.length > 0 && attempt < maxRetries) {
+        warn(`Execution validation critical (attempt ${attempt}): ${validationResult.critical.join(', ')}`);
+        endStep(false, 'Critical issues, retrying...');
         continue;
       }
 
-      if (validationResult.issues.length > 0) {
-        warn(`Validation issues: ${validationResult.issues.join(', ')}`);
+      if (validationResult.warnings?.length > 0) {
+        warn(`Validation warnings: ${validationResult.warnings.join(', ')}`);
       }
+
+      // Run structural diff review
+      const diffReview = await reviewDiff(tmpDir);
+      if (diffReview.warnings.length > 0) {
+        validationResult.warnings = [...(validationResult.warnings || []), ...diffReview.warnings];
+        validationResult.issues = [...(validationResult.issues || []), ...diffReview.warnings];
+        warn(`Diff review warnings: ${diffReview.warnings.join(', ')}`);
+      }
+
       endStep(validationResult.valid, validationResult.valid ? 'Validation passed' : `Issues: ${validationResult.issues.join(', ')}`);
       break;
     }
@@ -372,7 +383,10 @@ async function processServiceBranch(config, ticket, serviceConfig, repoUrl, tick
     // Create PR
     const prResult = await createPR(
       config, tmpDir, featureBranch, baseBranch, ticketKey, ticket.summary,
-      executionResult?.output || cheatsheet
+      cheatsheet, {
+        validationIssues: validationResult?.warnings || [],
+        critical: validationResult?.critical || [],
+      }
     );
 
     if (prResult?.prId) {

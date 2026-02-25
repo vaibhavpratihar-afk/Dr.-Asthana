@@ -24,18 +24,18 @@ export function buildArgs(prompt, modeConfig) {
   let args;
 
   if (resumeSessionId) {
-    // Resume: codex exec resume <threadId> "<prompt>" --json --approval-mode full-auto
+    // Resume: codex exec resume <threadId> "<prompt>" --json --full-auto
     args = [
       'exec', 'resume', resumeSessionId, prompt,
       '--json',
-      '--approval-mode', 'full-auto',
+      '--full-auto',
     ];
   } else {
-    // Fresh: codex exec "<prompt>" --json --approval-mode full-auto
+    // Fresh: codex exec "<prompt>" --json --full-auto
     args = [
       'exec', prompt,
       '--json',
-      '--approval-mode', 'full-auto',
+      '--full-auto',
     ];
   }
 
@@ -87,12 +87,19 @@ export function parseStreamOutput(rawStdout, exitCode) {
     // Capture text from message items
     if (event.type === 'item.completed' && event.item) {
       const item = event.item;
+
+      // Format 1: item.type === 'message' with content array (older Codex versions)
       if (item.type === 'message' && Array.isArray(item.content)) {
         for (const block of item.content) {
           if (block.type === 'output_text' || block.type === 'text') {
             lastItemText = block.text || block.value || lastItemText;
           }
         }
+      }
+
+      // Format 2: item.type === 'agent_message' with top-level text (Codex 0.1+)
+      if (item.type === 'agent_message' && item.text) {
+        lastItemText = item.text;
       }
     }
   }

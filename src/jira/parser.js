@@ -44,72 +44,94 @@ function extractTextFromADF(content) {
   const textParts = [];
 
   for (const node of content) {
-    if (node.type === 'text' && node.text) {
-      textParts.push(applyMarks(node.text, node.marks));
-    } else if (node.type === 'hardBreak') {
-      textParts.push('\n');
-    } else if (node.type === 'paragraph' && node.content) {
-      textParts.push(extractTextFromADF(node.content));
-      textParts.push('\n');
-    } else if (node.type === 'bulletList') {
-      if (node.content) {
-        for (const listItem of node.content) {
-          textParts.push('- ');
-          textParts.push(extractTextFromADF(listItem.content || []));
+    switch (node.type) {
+      case 'text':
+        if (node.text) textParts.push(applyMarks(node.text, node.marks));
+        break;
+      case 'hardBreak':
+        textParts.push('\n');
+        break;
+      case 'paragraph':
+        if (node.content) {
+          textParts.push(extractTextFromADF(node.content));
           textParts.push('\n');
         }
-      }
-    } else if (node.type === 'orderedList') {
-      if (node.content) {
-        for (let i = 0; i < node.content.length; i++) {
-          textParts.push(`${i + 1}. `);
-          textParts.push(extractTextFromADF(node.content[i].content || []));
-          textParts.push('\n');
-        }
-      }
-    } else if (node.type === 'table') {
-      if (node.content) {
-        const rows = [];
-        let isFirstRow = true;
-        for (const row of node.content) {
-          if (row.type !== 'tableRow' || !row.content) continue;
-          const cells = row.content.map((cell) => {
-            const cellText = extractTextFromADF(cell.content || []);
-            return cellText.replace(/\n/g, ' ').trim();
-          });
-          rows.push(`| ${cells.join(' | ')} |`);
-          if (isFirstRow) {
-            rows.push(`| ${cells.map(() => '---').join(' | ')} |`);
-            isFirstRow = false;
+        break;
+      case 'bulletList':
+        if (node.content) {
+          for (const listItem of node.content) {
+            textParts.push('- ');
+            textParts.push(extractTextFromADF(listItem.content || []));
+            textParts.push('\n');
           }
         }
-        textParts.push(rows.join('\n'));
+        break;
+      case 'orderedList':
+        if (node.content) {
+          for (let i = 0; i < node.content.length; i++) {
+            textParts.push(`${i + 1}. `);
+            textParts.push(extractTextFromADF(node.content[i].content || []));
+            textParts.push('\n');
+          }
+        }
+        break;
+      case 'table':
+        if (node.content) {
+          const rows = [];
+          let isFirstRow = true;
+          for (const row of node.content) {
+            if (row.type !== 'tableRow' || !row.content) continue;
+            const cells = row.content.map((cell) => {
+              const cellText = extractTextFromADF(cell.content || []);
+              return cellText.replace(/\n/g, ' ').trim();
+            });
+            rows.push(`| ${cells.join(' | ')} |`);
+            if (isFirstRow) {
+              rows.push(`| ${cells.map(() => '---').join(' | ')} |`);
+              isFirstRow = false;
+            }
+          }
+          textParts.push(rows.join('\n'));
+          textParts.push('\n');
+        }
+        break;
+      case 'blockquote':
+        textParts.push((extractTextFromADF(node.content || [])).split('\n').map((line) => `> ${line}`).join('\n'));
         textParts.push('\n');
+        break;
+      case 'panel': {
+        const panelType = (node.attrs?.panelType || 'info').toUpperCase();
+        textParts.push(`[${panelType}] `);
+        textParts.push(extractTextFromADF(node.content || []));
+        textParts.push('\n');
+        break;
       }
-    } else if (node.type === 'blockquote') {
-      const inner = extractTextFromADF(node.content || []);
-      textParts.push(inner.split('\n').map((line) => `> ${line}`).join('\n'));
-      textParts.push('\n');
-    } else if (node.type === 'panel') {
-      const panelType = (node.attrs?.panelType || 'info').toUpperCase();
-      textParts.push(`[${panelType}] `);
-      textParts.push(extractTextFromADF(node.content || []));
-      textParts.push('\n');
-    } else if (node.type === 'inlineCard') {
-      textParts.push(node.attrs?.url || '');
-    } else if (node.type === 'mention') {
-      textParts.push(`@${node.attrs?.text || node.attrs?.id || 'unknown'}`);
-    } else if (node.type === 'codeBlock' && node.content) {
-      textParts.push('```\n');
-      textParts.push(extractTextFromADF(node.content));
-      textParts.push('\n```\n');
-    } else if (node.type === 'heading' && node.content) {
-      const level = node.attrs?.level || 1;
-      textParts.push('#'.repeat(level) + ' ');
-      textParts.push(extractTextFromADF(node.content));
-      textParts.push('\n');
-    } else if (node.content) {
-      textParts.push(extractTextFromADF(node.content));
+      case 'inlineCard':
+        textParts.push(node.attrs?.url || '');
+        break;
+      case 'mention':
+        textParts.push(`@${node.attrs?.text || node.attrs?.id || 'unknown'}`);
+        break;
+      case 'codeBlock':
+        if (node.content) {
+          textParts.push('```\n');
+          textParts.push(extractTextFromADF(node.content));
+          textParts.push('\n```\n');
+        }
+        break;
+      case 'heading':
+        if (node.content) {
+          const level = node.attrs?.level || 1;
+          textParts.push('#'.repeat(level) + ' ');
+          textParts.push(extractTextFromADF(node.content));
+          textParts.push('\n');
+        }
+        break;
+      default:
+        if (node.content) {
+          textParts.push(extractTextFromADF(node.content));
+        }
+        break;
     }
   }
 

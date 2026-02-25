@@ -56,12 +56,72 @@ function readFileIfExists(filePath) {
 }
 
 /**
+ * Extract file paths from text (ticket description, comments).
+ * Matches patterns like `path/to/file.js`, backtick-quoted paths, and markdown list items.
+ */
+export function extractFilePaths(text) {
+  if (!text) return [];
+  const paths = new Set();
+
+  // Match backtick-quoted paths: `server/utils/foo.js`
+  for (const m of text.matchAll(/`([a-zA-Z0-9_./-]+\.[a-zA-Z]{1,5})`/g)) {
+    paths.add(m[1]);
+  }
+
+  // Match markdown list items starting with a path: - server/utils/foo.js
+  for (const m of text.matchAll(/^[\s]*[-*]\s+`?([a-zA-Z0-9_./-]+\.[a-zA-Z]{1,5})`?/gm)) {
+    paths.add(m[1]);
+  }
+
+  return [...paths].filter(p => !p.startsWith('.') && p.includes('/'));
+}
+
+/**
+ * Read referenced files from the clone and format as context.
+ * Skips files that don't exist or are too large.
+ */
+function buildReferencedFilesContext(cloneDir, filePaths, maxPerFile = 8000, maxTotal = 60000) {
+  if (!filePaths || filePaths.length === 0) return '';
+
+  const lines = [];
+  let totalSize = 0;
+
+  lines.push('## Referenced Files (from ticket)');
+  lines.push('');
+
+  for (const relPath of filePaths) {
+    if (totalSize >= maxTotal) {
+      lines.push(`\n(Truncated — ${maxTotal} char limit reached, remaining files omitted)`);
+      break;
+    }
+
+    const content = readFileIfExists(path.join(cloneDir, relPath));
+    if (content === null) continue;
+
+    const truncated = content.length > maxPerFile;
+    const snippet = truncated ? content.substring(0, maxPerFile) : content;
+    totalSize += snippet.length;
+
+    lines.push(`### ${relPath}`);
+    lines.push('```');
+    lines.push(snippet);
+    if (truncated) lines.push(`\n... (truncated, ${content.length} chars total)`);
+    lines.push('```');
+    lines.push('');
+  }
+
+  return lines.length > 2 ? lines.join('\n') : '';
+}
+
+/**
  * Build codebase context from a cloned repo directory.
  *
  * @param {string} cloneDir - Path to cloned repo
+ * @param {object} [options]
+ * @param {string[]} [options.referencedFiles] - File paths extracted from ticket to pre-include
  * @returns {string} Markdown string with codebase context
  */
-export function buildCodebaseContext(cloneDir) {
+export function buildCodebaseContext(cloneDir, options = {}) {
   const lines = [];
 
   // Read instruction files
@@ -108,6 +168,14 @@ export function buildCodebaseContext(cloneDir) {
         lines.push('');
       }
     } catch { /* invalid JSON */ }
+  }
+
+  // Pre-loaded files referenced in the ticket
+  if (options.referencedFiles && options.referencedFiles.length > 0) {
+    const refContext = buildReferencedFilesContext(cloneDir, options.referencedFiles);
+    if (refContext) {
+      lines.push(refContext);
+    }
   }
 
   return lines.join('\n');

@@ -7,7 +7,7 @@
  */
 
 import { buildTicketContext } from './ticket-context.js';
-import { buildCodebaseContext } from './codebase-context.js';
+import { buildCodebaseContext, extractFilePaths } from './codebase-context.js';
 import { createCouncil } from '../council/index.js';
 import { buildProposerPrompt, buildCriticPrompt, buildAgreementPrompt } from './council-prompts.js';
 import { validateExecution } from './validator.js';
@@ -25,13 +25,15 @@ const PROPOSER_ROLE =
   'Propose a detailed implementation strategy for this ticket. ' +
   'List every file to change, what to change, and in what order. ' +
   'For core logic changes, provide exact code snippets. ' +
-  'For boilerplate, provide directional guidance.';
+  'For boilerplate, provide directional guidance. ' +
+  'Include test file updates: find existing spec/test files for the modules you change and describe what test cases need updating.';
 
 const CRITIC_ROLE =
   'Read the Proposer\'s proposal. ' +
   'Explore the codebase to verify their claims. ' +
   'Critique: what did they miss? What\'s wrong? What\'s a better approach? ' +
-  'Propose your own complete strategy.';
+  'Propose your own complete strategy. ' +
+  'Pay special attention to test coverage: if the proposal changes source files, verify that corresponding spec/test files are also updated. Check for files that import the changed modules — they may need updates too.';
 
 function buildExtractorPrompt(councilOutput, ticketContext, force) {
   const modeInstruction = force
@@ -80,9 +82,14 @@ export async function buildCheatsheet(ticketData, cloneDir, config, options = {}
   log('Building ticket context...');
   const ticketContext = buildTicketContext(ticketData);
 
-  // 2. Read codebase context
+  // 2. Read codebase context (pre-include files referenced in ticket)
   log('Building codebase context...');
-  const codebaseContext = buildCodebaseContext(cloneDir);
+  const ticketText = `${ticketData.description || ''}\n${(ticketData.comments || []).map(c => c.text).join('\n')}`;
+  const referencedFiles = extractFilePaths(ticketText);
+  if (referencedFiles.length > 0) {
+    log(`Found ${referencedFiles.length} file paths in ticket — pre-loading contents`);
+  }
+  const codebaseContext = buildCodebaseContext(cloneDir, { referencedFiles });
 
   // 3. Configure and run council
   log('Starting council...');
@@ -130,4 +137,4 @@ export async function buildCheatsheet(ticketData, cloneDir, config, options = {}
   };
 }
 
-export { validateExecution } from './validator.js';
+export { validateExecution, reviewDiff } from './validator.js';
