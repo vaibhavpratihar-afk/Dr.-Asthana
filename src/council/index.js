@@ -5,4 +5,4 @@
  * actionable outputs judged by caller-defined acceptance criteria.
  */
 
-export { createCouncil } from './council.js';
+export { createCouncil } from './create-council.js';

@@ -6,8 +6,8 @@
  * re-read the codebase or re-derive conclusions from previous rounds.
  */
 
-import { runAI } from '../ai-provider/index.js';
-import { warn } from '../utils/logger.js';
+import { runAI } from '../../ai-provider/index.js';
+import { warn } from '../../utils/logger.js';
 
 /**
  * Run a single council agent (proposer, critic, or agreement phase)

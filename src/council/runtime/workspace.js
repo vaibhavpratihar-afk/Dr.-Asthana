@@ -21,7 +21,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import { log, warn, debug } from '../utils/logger.js';
+import { log, warn, debug } from '../../utils/logger.js';
 
 /**
  * Initialize the council workspace directory with an initial status file.

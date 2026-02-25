@@ -13,10 +13,10 @@
  * All AI spawning goes through the AI Provider module via runAI().
  */
 
-import { runAI } from '../ai-provider/index.js';
-import { isGarbageOutput } from '../ai-provider/provider.js';
-import { defaultStructuralCheck, DEFAULT_APPROVAL_KEYWORD, DEFAULT_REJECTION_KEYWORD, DEFAULT_FEEDBACK_MARKER } from './defaults.js';
-import { log, warn } from '../utils/logger.js';
+import { runAI } from '../../ai-provider/index.js';
+import { isGarbageOutput } from '../../ai-provider/provider.js';
+import { defaultStructuralCheck, DEFAULT_APPROVAL_KEYWORD, DEFAULT_REJECTION_KEYWORD, DEFAULT_FEEDBACK_MARKER } from '../config/defaults.js';
+import { log, warn } from '../../utils/logger.js';
 
 /**
  * Evaluate council output using configurable structural + AI checks.

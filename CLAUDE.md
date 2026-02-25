@@ -40,7 +40,8 @@ src/
   index.js                → CLI entry point (daemon, single, dry-run, resume)
   ai-provider/
     index.js              → Public API: runAI(), getProviderLabel(), checkProviderAvailable()
-    provider.js           → Core spawn engine (process lifecycle, streaming, timeout, heartbeat)
+    provider.js           → Public facade (stable exports used by strategies/council)
+    provider/             → Internal runtime (spawn-runtime, event-parser, log-writer, result-utils)
     adapters/
       claude.js           → Claude Code CLI adapter (args builder, stream-json parser)
       codex.js            → Codex CLI adapter (args builder, output parser)
@@ -53,11 +54,13 @@ src/
     index.js              → Deliberately dumb executor (static prompt + cheatsheet → runAI)
   council/
     index.js              → Public API: createCouncil()
-    council.js            → Round orchestrator (proposer → critics → agreement → evaluate)
-    runner.js             → AI call wrapper with session memory across rounds
-    evaluator.js          → Configurable quality gate (structural pre-checks + AI evaluation)
-    workspace.js          → File-based observability, round artifacts, human-in-the-loop
-    defaults.js           → Default agreement role, structural checks, approval/rejection keywords
+    create-council.js     → Public API + options validation (createCouncil)
+    orchestrator/         → run-council coordinator
+    stages/               → proposer, critics, agreement, evaluation stage modules
+    runtime/              → runner + workspace (AI calls, artifacts, human feedback)
+    evaluator/            → configurable quality gate (structural pre-checks + AI evaluation)
+    config/               → defaults + agent resolver
+    utils/                → feedback helper(s)
   infra/
     index.js              → Infrastructure lifecycle (start/stop MongoDB, Redis, Kafka)
   jira/
@@ -186,7 +189,7 @@ Owns all prompt construction across the pipeline. For the council, it provides t
 - `validator.js` — post-execution validation: empty diff (critical), cheatsheet step completeness (critical if <50% or test files missing), broken imports (warning), debug logs (warning). Also provides `reviewDiff()` for structural diff review (TODO/FIXME, JSON validity, broken imports). Returns `{valid, issues, critical, warnings}`.
 
 ## AI Provider Module (`src/ai-provider/`)
-Single interface for all AI CLI spawning. No other module spawns `claude` or `codex` directly. Handles process lifecycle, streaming JSON parsing, timeout, heartbeat monitoring, and log capture.
+Single interface for all AI CLI spawning. No other module spawns `claude` or `codex` directly. `provider.js` is the public facade; process lifecycle, JSON event parsing, timeout/heartbeat, and log capture live under `provider/`.
 
 ### Modes
 | Mode | Purpose | Tools | Model | Used By |

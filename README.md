@@ -51,16 +51,19 @@ src/
   index.js                → CLI entry point (daemon, single, dry-run, resume)
   ai-provider/            → Sole interface for spawning AI CLIs
     index.js              → runAI(), getProviderLabel(), checkProviderAvailable()
-    provider.js           → Core spawn engine (process lifecycle, streaming, timeout)
+    provider.js           → Public facade (stable exports used by strategies/council)
+    provider/             → Internal runtime pieces (spawn-runtime, event-parser, log-writer, result-utils)
     adapters/             → Claude Code and Codex CLI adapters
     strategies/           → single, fallback, parallel, race
   agent/                  → Deliberately dumb executor (static prompt + cheatsheet)
   council/                → Reusable multi-agent deliberation engine
-    council.js            → Round orchestrator (proposer → critics → agreement → evaluate)
-    runner.js             → AI call wrapper with session memory
-    evaluator.js          → Configurable quality gate (structural + AI)
-    workspace.js          → File-based observability and human feedback
-    defaults.js           → Default agreement role, structural checks, keywords
+    create-council.js     → Public API + options validation (createCouncil)
+    orchestrator/         → run-council coordinator
+    stages/               → proposer, critics, agreement, evaluation stage modules
+    runtime/              → runner + workspace (AI calls, artifacts, human feedback)
+    evaluator/            → configurable quality gate (structural + AI)
+    config/               → defaults + agent resolver
+    utils/                → feedback helper(s)
   infra/                  → MongoDB/Redis/Kafka lifecycle
   jira/                   → JIRA REST API (read), CLI operations (write), ticket parser, validator
   notification/           → Slack DMs, JIRA ADF comments, report formatters, log upload

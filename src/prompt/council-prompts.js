@@ -5,7 +5,7 @@
  * The council engine receives these as config and calls them with round state.
  */
 
-import { DEFAULT_AGREEMENT_ROLE } from '../council/defaults.js';
+import { DEFAULT_AGREEMENT_ROLE } from '../council/config/defaults.js';
 
 export function buildProposerPrompt(round, baseContext, proposerOutput, criticOutputs, proposerRole, initialFeedback) {
   if (round === 1) {
