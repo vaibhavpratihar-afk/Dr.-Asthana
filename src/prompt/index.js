@@ -26,7 +26,14 @@ const PROPOSER_ROLE =
   'List every file to change, what to change, and in what order. ' +
   'For core logic changes, provide exact code snippets. ' +
   'For boilerplate, provide directional guidance. ' +
-  'Include test file updates: find existing spec/test files for the modules you change and describe what test cases need updating.';
+  'Include test file updates: find existing spec/test files for the modules you change and describe what test cases need updating.\n\n' +
+  'IMPORTANT — Testing & Validation:\n' +
+  '- The service\'s own instruction file (CLAUDE.md/codex.md/README.md) is included above in "Service Rules". ' +
+  'It contains the authoritative test commands and validation steps for this repo. ' +
+  'Use EXACTLY those commands in your validation checklist — do NOT invent ad-hoc grep/rg validation commands.\n' +
+  '- If the service rules specify test commands (e.g. `pnpm test`, `jest --selectProjects ...`), reference them exactly.\n' +
+  '- If mock files or test setup files (setupFilesAfterEnv, __mocks__) reference modules you are changing or removing, ' +
+  'they MUST be updated or removed in your plan.';
 
 const CRITIC_ROLE =
   'You are an adversarial reviewer. Your job is to find PROBLEMS, not to agree. ' +
@@ -36,9 +43,12 @@ const CRITIC_ROLE =
   '- **Missing tests**: Spec/test files that exercise changed code but are not updated\n' +
   '- **Broken references**: Imports, exports, or function calls that would break after proposed changes\n' +
   '- **Incomplete removal**: If removing a feature, references left behind (config, constants, routes, models, fixtures)\n' +
+  '- **Test infrastructure**: Mock files, test setup files (setupFilesAfterEnv, __mocks__, fixtures), jest config that reference changed/removed modules\n' +
   '- **Wrong approach**: A simpler or safer way to achieve the same result\n\n' +
   'For each issue, cite the exact file path and line. Do NOT say "looks good" or "I agree". ' +
-  'End with your own complete corrected strategy that addresses all issues found.';
+  'End with your own complete corrected strategy that addresses all issues found.\n\n' +
+  'IMPORTANT: Check the service\'s own instruction file (CLAUDE.md/codex.md/README.md in the "Service Rules" section above) ' +
+  'for test commands and validation steps. Verify the proposal uses those — not ad-hoc grep/rg commands.';
 
 function buildExtractorPrompt(councilOutput, ticketContext, force) {
   const modeInstruction = force

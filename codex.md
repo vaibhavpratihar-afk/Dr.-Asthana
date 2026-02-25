@@ -103,7 +103,7 @@ clean.sh                   → Cleanup utility: ./clean.sh (all) or ./clean.sh <
 The system separates **thinking** from **doing**: expensive models collaborate in a council to produce a plan, then a cheap model executes it.
 
 ### 1. Council (expensive models)
-A group of AI agents collaborate via file-based discussions to produce an actionable output. A proposer explores the codebase and proposes a strategy. Adversarial critics must independently verify claims in the codebase and find at least 3 concrete issues (missing files, missing tests, broken references, incomplete removal, wrong approach). The proposer then synthesizes critiques into a unified plan (AGREED/DISAGREE protocol) — AGREED requires all valid critiques addressed, all importing files accounted for, test files included, and no dangling references. Runs 1-3 rounds until convergence. All discussions are persisted to disk for full visibility. Human feedback can be injected mid-council via a `human-feedback.md` file. Agents maintain session memory across rounds to avoid re-reading the codebase.
+A group of AI agents collaborate via file-based discussions to produce an actionable output. A proposer explores the codebase and proposes a strategy — must follow the service's own instruction files (CLAUDE.md/codex.md/README.md) for test commands and validation steps, not invent ad-hoc ones. Adversarial critics must independently verify claims in the codebase and find at least 3 concrete issues (missing files, missing tests, broken references, incomplete removal, test infrastructure like mocks/fixtures/setupFiles, wrong approach). The proposer then synthesizes critiques via AGREED/DISAGREE protocol — AGREED means the existing plan already covers every critique WITHOUT changes; DISAGREE means at least one critique requires plan changes (triggers another round). Runs 1-3 rounds until convergence. All discussions are persisted to disk for full visibility. Human feedback can be injected mid-council via a `human-feedback.md` file. Agents maintain session memory across rounds to avoid re-reading the codebase.
 
 ### 2. Evaluate (configurable quality gate)
 Structural pre-checks (fast, no API calls: minimum length, file paths, action verbs) followed by an AI evaluator that judges the council output and extracts a clean artifact between configurable markers.
@@ -146,14 +146,14 @@ Single interface for all AI CLI spawning. No other module spawns `claude` or `co
 ```
 Step 1:   FETCH_TICKET — fetch from JIRA REST API, parse ADF → markdown
 Step 2:   VALIDATE_TICKET — required fields, scope checks, service config lookup
-Step 2.5: Transition to In-Progress + JIRA comment with scope details
+Step 2.5: Transition to In-Progress + JIRA comment (both non-blocking, independent)
 Steps 3-7: For each service × branch (fully sequential, isolated clones):
   Step 3: CLONE_REPO — shallow clone, create feature branch, inject agent rules
   Step 4: BUILD_CHEATSHEET — council deliberation → quality gate → extract cheatsheet
   Step 5: EXECUTE — cheap model follows cheatsheet (static prompt + guardrails)
   Step 6: VALIDATE_EXECUTION — critical issues (empty diff, missing tests, <50% completion) trigger retry; warnings (broken imports, debug logs, TODO/FIXME) flagged in PR. Includes structural diff review.
   Step 7: SHIP — commit, push (force if needed), base tag if applicable, create PR (cheatsheet + validation warnings in description)
-Step 8:   NOTIFY — JIRA final report, Slack DM, log upload, label updates, transition
+Step 8:   NOTIFY — bundle artifact, transition (non-blocking), JIRA comment + Slack DM (always, even if transition fails), label updates
 ```
 
 ## Processing Model
@@ -184,10 +184,12 @@ All JIRA write operations route through `jira-cli.mjs` via `jira/transitions.js`
 - **jira-cli.mjs**: Working directory defaults to `~/Desktop/skills/jira/scripts/`.
 
 ## Notifications
-- **JIRA:** Structured ADF comment with PR table, summary, and failure panels.
-- **Slack:** DM to configured user with all PR links and summary.
-- **Run Artifact:** At end of run, the entire `.pipeline-state/{ticketKey}/` directory is bundled into a `.tar.gz` and uploaded to Pixelbin CDN. The artifact URL is linked in JIRA comments and Slack DMs.
-- **Length limits:** Summarized via `utils/summariser.js` (`aisum` with presets). Hard truncation only as fallback.
+Design principle: **Slack and JIRA messages are for humans** — plain language, no jargon. Link to the run report for debugging details. PR descriptions are for code reviewers.
+- **JIRA:** Plain-English comments. PR links + brief summary + "Full report" link for details. Comments always post even if transitions fail.
+- **Slack:** Concise DM with PR link, 200-char summary, and report link. Designed to be read in 5 seconds.
+- **PR Description:** Comprehensive for reviewers — 2000-char approach summary, file change list, diff stats, review notes.
+- **Run Artifact:** At end of run, `.pipeline-state/{ticketKey}/` bundled into `.tar.gz` and uploaded to Pixelbin CDN. URL included in JIRA/Slack as "Full report" link.
+- **Length limits:** Summarized via `utils/summariser.js` (`aisum` with presets: slack-message 500, pr-description 2500). Hard truncation only as fallback.
 
 ## Azure DevOps PR Creation
 - PRs created via `az repos pr create` with org/project from config.

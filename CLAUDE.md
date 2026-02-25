@@ -103,7 +103,7 @@ clean.sh                   → Cleanup utility: ./clean.sh (all) or ./clean.sh <
 The system separates **thinking** from **doing**: expensive models collaborate in a council to produce a plan, then a cheap model executes it.
 
 ### 1. Council (expensive models)
-A group of AI agents collaborate via file-based discussions to produce an actionable output. A proposer explores the codebase and proposes a strategy. Adversarial critics must independently verify claims in the codebase and find at least 3 concrete issues (missing files, missing tests, broken references, incomplete removal, wrong approach). The proposer then synthesizes critiques into a unified plan (AGREED/DISAGREE protocol) — AGREED requires all valid critiques addressed, all importing files accounted for, test files included, and no dangling references. Runs 1-3 rounds until convergence. All discussions are persisted to disk for full visibility. Human feedback can be injected mid-council via a `human-feedback.md` file. Agents maintain session memory across rounds to avoid re-reading the codebase.
+A group of AI agents collaborate via file-based discussions to produce an actionable output. A proposer explores the codebase and proposes a strategy — must follow the service's own instruction files (CLAUDE.md/codex.md/README.md) for test commands and validation steps, not invent ad-hoc ones. Adversarial critics must independently verify claims in the codebase and find at least 3 concrete issues (missing files, missing tests, broken references, incomplete removal, test infrastructure like mocks/fixtures/setupFiles, wrong approach). The proposer then synthesizes critiques via AGREED/DISAGREE protocol — AGREED means the existing plan already covers every critique WITHOUT changes; DISAGREE means at least one critique requires plan changes (triggers another round). Runs 1-3 rounds until convergence. All discussions are persisted to disk for full visibility. Human feedback can be injected mid-council via a `human-feedback.md` file. Agents maintain session memory across rounds to avoid re-reading the codebase.
 
 ### 2. Evaluate (configurable quality gate)
 Structural pre-checks (fast, no API calls: minimum length, file paths, action verbs) followed by an AI evaluator that judges the council output and extracts a clean artifact between configurable markers. Approval/rejection keywords and extraction markers are defined by the caller.
@@ -181,7 +181,7 @@ Owns all prompt construction across the pipeline. For the council, it provides t
 - `buildCheatsheet()` — builds ticket + codebase context, configures a council with ticket-specific roles and evaluation, runs it, returns the cheatsheet
 - `council-prompts.js` — prompt builders passed into `createCouncil()` (proposer, critic, agreement phase prompts)
 - `ticket-context.js` — converts parsed ticket data into markdown context
-- `codebase-context.js` — reads CLAUDE.md/CODEX.md, file tree, package.json from clone. Pre-loads referenced files as 2K previews (40K total budget) — agents read full files on demand via tools.
+- `codebase-context.js` — reads CLAUDE.md/CODEX.md/codex.md/README.md (labeled as "Service Rules" — the authoritative source for test/build commands), file tree, package.json from clone. Pre-loads referenced files as 2K previews (40K total budget) — agents read full files on demand via tools.
 - `static.js` — executor rules (follow cheatsheet exactly, no git/docker/deploy)
 - `validator.js` — post-execution validation: empty diff (critical), cheatsheet step completeness (critical if <50% or test files missing), broken imports (warning), debug logs (warning). Also provides `reviewDiff()` for structural diff review (TODO/FIXME, JSON validity, broken imports). Returns `{valid, issues, critical, warnings}`.
 
@@ -212,14 +212,14 @@ Orchestrates the full ticket processing flow. Each step is checkpointed to disk 
 ```
 Step 1:   FETCH_TICKET — fetch from JIRA REST API, parse ADF → markdown
 Step 2:   VALIDATE_TICKET — required fields, scope checks, service config lookup
-Step 2.5: Transition to In-Progress + JIRA comment with scope details
+Step 2.5: Transition to In-Progress + JIRA comment (both non-blocking, independent)
 Steps 3-7: For each service × branch (fully sequential, isolated clones):
   Step 3: CLONE_REPO — shallow clone, create feature branch, inject agent rules
   Step 4: BUILD_CHEATSHEET — council deliberation → quality gate → extract cheatsheet
   Step 5: EXECUTE — cheap model follows cheatsheet (static prompt + guardrails)
   Step 6: VALIDATE_EXECUTION — critical issues (empty diff, missing tests, <50% completion) trigger retry; warnings (broken imports, debug logs, TODO/FIXME) flagged in PR. Includes structural diff review.
   Step 7: SHIP — commit, push (force if needed), base tag if applicable, create PR (cheatsheet + validation warnings in description)
-Step 8:   NOTIFY — JIRA final report, Slack DM, log upload, label updates, transition
+Step 8:   NOTIFY — bundle artifact, transition (non-blocking), JIRA comment + Slack DM (always, even if transition fails), label updates
 ```
 
 ### Checkpoint Persistence
@@ -246,11 +246,18 @@ Two-layer architecture: `client.js` handles read-only REST API calls (fetch tick
 Git operations, Azure DevOps PR creation, and base image tagging.
 
 - **Git** (`git.js`): Shallow clone (`--depth=50`), feature branch creation, agent rules injection (CLAUDE.md/CODEX.md restored before commit), force push on branch conflict.
-- **Azure DevOps** (`azure.js`): PR creation via `az repos pr create`. PR description built from summarised cheatsheet (2500 char limit) + `git diff --stat` + validation warnings. Hard-capped at 4000 chars (Azure DevOps limit). Handles TF401179 (PR already exists) by finding and returning the existing PR.
+- **Azure DevOps** (`azure.js`): PR creation via `az repos pr create`. PR description is structured for code reviewers (human and AI): ticket context, 2000-char implementation approach summarised from cheatsheet, file change list extracted from cheatsheet with per-file descriptions, diff stats, and review notes (validation warnings/critical issues). Hard-capped at 4000 chars (Azure DevOps limit). Handles TF401179 (PR already exists) by finding and returning the existing PR.
 - **Base Tagger** (`base-tagger.js`): Auto-detected from Dockerfile. Creates `deploy.base.vMAJOR-MINOR-PATCH-BUILD` tags when `package.json`/`package-lock.json` change. Requires: Dockerfile with base-images registry FROM, Dockerfile.base, and azure-pipelines.yml.
 
 ## Notification Module (`src/notification/`)
-JIRA comments (structured ADF with PR tables, summary panels, failure panels), Slack DMs (Block Kit messages with PR links), and run log upload to Pixelbin CDN. All long content auto-summarized via `utils/summariser.js` with presets (jira-comment: 32k chars, slack-message: 4k chars, pr-title: 120 chars, pr-description: 2500 chars). Hard truncation only as fallback. All Slack mrkdwn fields sanitized via `sanitizeForSlack()` (strips control chars, caps at 3000 chars). Slack `sendDM()` retries with plain text fallback on `invalid_blocks` errors.
+Design principle: **Slack and JIRA messages are for humans** — plain language, no jargon, no code blocks. Link to the run report for debugging details. PR descriptions are the one place for comprehensive technical detail.
+
+- **JIRA comments:** Layman-friendly plain English. In-progress: "Working on X — targeting branch Y". Final: plain-English summary + PR links + report link. No tables, no code blocks, no cheatsheet dumps.
+- **Slack DMs:** Concise Block Kit messages — 3-4 blocks max. Header, PR link + 200-char summary, footer with report link. Not a wall of text.
+- **Report link:** All debugging detail is in the run artifact (uploaded to Pixelbin CDN). JIRA/Slack just link to it.
+- **Sanitization:** All Slack mrkdwn fields sanitized via `sanitizeForSlack()` (strips control chars, caps at 3000 chars). `sendDM()` retries with plain text fallback on `invalid_blocks` errors.
+- **Summarisation:** Via `utils/summariser.js` (`aisum` with presets: jira-comment 32k, slack-message 500, pr-title 120, pr-description 2500). Hard truncation only as fallback.
+- JIRA comments and transitions are decoupled — comment always posts even if transition fails.
 
 ## Git Operations
 - Feature branches: `feature/{ticketKey}-{sanitized-summary}` (single branch) or `feature/{ticketKey}-{sanitized-summary}-{version}` (multi-branch).
@@ -274,10 +281,11 @@ All JIRA write operations route through `jira-cli.mjs` via `jira/transitions.js`
 - **jira-cli.mjs**: Working directory defaults to `~/Desktop/skills/jira/scripts/`.
 
 ## Notifications
-- **JIRA:** Structured ADF comment with PR table, summary, and failure panels.
-- **Slack:** DM to configured user with all PR links and summary.
-- **Run Artifact:** At end of run, `.pipeline-state/{ticketKey}/` is bundled into a `.tar.gz` and uploaded to Pixelbin CDN via `bundleRunArtifact()`. URL included in JIRA/Slack.
+- **JIRA:** Plain-English comments for non-technical readers. PR links + brief summary + report link for details.
+- **Slack:** Concise DM with PR link, 200-char summary, and report link. Designed to be read in 5 seconds.
+- **Run Artifact:** At end of run, `.pipeline-state/{ticketKey}/` is bundled into a `.tar.gz` and uploaded to Pixelbin CDN via `bundleRunArtifact()`. URL included in JIRA/Slack as "Full report" link for debugging.
 - **Length limits:** Summarized via `utils/summariser.js` (`aisum` with presets). Hard truncation only as fallback.
+- Comments are always posted regardless of whether JIRA transitions succeed or fail.
 
 ## Azure DevOps PR Creation
 - PRs created via `az repos pr create` with org/project from config.

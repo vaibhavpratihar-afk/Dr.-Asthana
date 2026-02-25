@@ -1,11 +1,11 @@
 /**
  * Report builder sub-module.
  *
- * All report functions return { jira: string, slack: object[]|null }
- * - jira is markdown string (for JIRA comment via jira-cli.mjs)
- * - slack is Block Kit blocks (for Slack DM) or null if Slack shouldn't fire
+ * Design principle: Slack and JIRA messages are for HUMANS — plain language,
+ * no jargon, no code blocks. Link to the run report for debugging details.
+ * PR descriptions are for REVIEWERS — comprehensive enough for code review.
  *
- * Uses summariser for char limit compliance.
+ * All report functions return { jira: string, slack: object[]|null }
  */
 
 import { summariseText } from '../utils/summariser.js';
@@ -21,7 +21,6 @@ const SLACK_MRKDWN_LIMIT = 3000;
  */
 function sanitizeForSlack(text) {
   if (!text) return '';
-  // Strip control chars except newline/tab
   let clean = text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
   if (clean.length > SLACK_MRKDWN_LIMIT) {
     clean = clean.substring(0, SLACK_MRKDWN_LIMIT - 3) + '...';
@@ -44,6 +43,23 @@ function safeSummarise(text, opts) {
     }
     return text || '';
   }
+}
+
+/**
+ * Build a human-friendly 2-3 sentence summary from a cheatsheet.
+ * This is NOT technical — it's for JIRA/Slack consumption by non-engineers.
+ */
+function buildHumanSummary(cheatsheet, limit = 300) {
+  if (!cheatsheet) return '';
+  return safeSummarise(cheatsheet, { limit, label: 'human-summary' });
+}
+
+/**
+ * Build a PR URL for display in JIRA/Slack.
+ */
+function prUrl(config, pr) {
+  if (pr.prUrl) return pr.prUrl;
+  return `${config.azureDevOps.org}/${config.azureDevOps.project}/_git/${pr.service}/pullrequest/${pr.prId}`;
 }
 
 /**
@@ -73,223 +89,188 @@ export function buildStepReport(stepName, details, timestamp) {
   return { jira, slack: null };
 }
 
-/**
- * Build the final report with all PRs, summary, and failures.
- */
+// ─────────────────────────────────────────────────
+// Final Report (success) — JIRA + Slack
+// ─────────────────────────────────────────────────
+
 export function buildFinalReport(config, allPRs, allFailures, cheatsheetSummary, artifactUrl) {
-  const azdoBase = config.azureDevOps.org;
-  const project = config.azureDevOps.project;
-
-  // --- JIRA comment ---
+  // --- JIRA: clean, scannable, layman-friendly ---
   const jiraLines = [];
-  jiraLines.push(`### Dr. Asthana — ${allPRs.length} PR(s) created`);
+  jiraLines.push(`### Implementation Complete`);
   jiraLines.push('');
 
-  jiraLines.push('| Service | Branch | PR |');
-  jiraLines.push('| --- | --- | --- |');
-  for (const pr of allPRs) {
-    const repo = pr.service;
-    const prUrl = pr.prUrl || `${azdoBase}/${project}/_git/${repo}/pullrequest/${pr.prId}`;
-    jiraLines.push(`| ${repo} | ${pr.baseBranch} | [#${pr.prId}](${prUrl}) |`);
-  }
-  jiraLines.push('');
-
-  if (cheatsheetSummary) {
-    const briefSummary = summariseText(cheatsheetSummary, {
-      preset: 'jira-comment',
-      label: 'jira-final-summary',
-    });
-    jiraLines.push(`**What was done:** ${briefSummary}`);
+  // Plain-English summary
+  const summary = buildHumanSummary(cheatsheetSummary);
+  if (summary) {
+    jiraLines.push(summary);
     jiraLines.push('');
   }
 
-  if (allFailures.length > 0) {
-    jiraLines.push(':::warning');
-    jiraLines.push('**Failed:**');
-    for (const f of allFailures) {
-      jiraLines.push(`- **${f.service}/${f.baseBranch}** — ${f.error}`);
+  // PR table — simple
+  if (allPRs.length > 0) {
+    jiraLines.push(`**Pull Request${allPRs.length > 1 ? 's' : ''}:**`);
+    for (const pr of allPRs) {
+      jiraLines.push(`- [PR #${pr.prId}](${prUrl(config, pr)}) — ${pr.service} / ${pr.baseBranch}`);
     }
-    jiraLines.push(':::');
     jiraLines.push('');
   }
 
-  if (artifactUrl) {
-    jiraLines.push(`**Run Artifact:** [View run artifact](${artifactUrl})`);
+  // Failures — plain language
+  if (allFailures.length > 0) {
+    jiraLines.push(`**Could not complete:**`);
+    for (const f of allFailures) {
+      jiraLines.push(`- ${f.service} (${f.baseBranch}) — ${f.error}`);
+    }
+    jiraLines.push('');
   }
 
-  // --- Slack blocks ---
+  // Report link
+  if (artifactUrl) {
+    jiraLines.push(`[View full report](${artifactUrl})`);
+  }
+
+  // --- Slack: short DM, 4-5 lines max ---
   const slackBlocks = [];
+
+  // Header
   slackBlocks.push({
     type: 'header',
-    text: { type: 'plain_text', text: `Dr. Asthana — ${allPRs.length} PR(s) created`, emoji: true },
+    text: { type: 'plain_text', text: `PR ready for review`, emoji: true },
   });
 
-  const prLines = allPRs.map(pr => {
-    const repo = pr.service;
-    const prUrl = pr.prUrl || `${azdoBase}/${project}/_git/${repo}/pullrequest/${pr.prId}`;
-    return `• <${prUrl}|#${pr.prId}> → ${repo} / \`${pr.baseBranch}\``;
-  });
+  // Core message: ticket + what was done + PR link — all in one block
+  const slackSummary = buildHumanSummary(cheatsheetSummary, 200);
+  const slackPrLines = allPRs.map(pr =>
+    `<${prUrl(config, pr)}|PR #${pr.prId}> — ${pr.service} / \`${pr.baseBranch}\``
+  );
 
+  let messageText = slackPrLines.join('\n');
+  if (slackSummary) {
+    messageText += `\n\n${slackSummary}`;
+  }
   slackBlocks.push({
     type: 'section',
-    text: { type: 'mrkdwn', text: sanitizeForSlack(prLines.join('\n')) },
+    text: { type: 'mrkdwn', text: sanitizeForSlack(messageText) },
   });
 
-  if (cheatsheetSummary) {
-    const slackSummary = safeSummarise(cheatsheetSummary, {
-      preset: 'slack-message',
-      label: 'slack-final-summary',
-    });
-    slackBlocks.push({ type: 'divider' });
-    slackBlocks.push({
-      type: 'section',
-      text: { type: 'mrkdwn', text: sanitizeForSlack(`*What was done:* ${slackSummary}`) },
-    });
-  }
-
+  // Failures
   if (allFailures.length > 0) {
     slackBlocks.push({
       type: 'section',
       text: {
         type: 'mrkdwn',
-        text: sanitizeForSlack(`:warning: *Failed:* ${allFailures.map(f => `${f.service}/${f.baseBranch}`).join(', ')}`),
+        text: sanitizeForSlack(`:warning: Could not complete: ${allFailures.map(f => f.service).join(', ')}`),
       },
     });
   }
 
-  if (artifactUrl) {
-    slackBlocks.push({
-      type: 'context',
-      elements: [{ type: 'mrkdwn', text: sanitizeForSlack(`:package: <${artifactUrl}|View run artifact>`) }],
-    });
-  }
-
+  // Footer: report link
+  const footerParts = [];
+  if (artifactUrl) footerParts.push(`<${artifactUrl}|Full report>`);
+  footerParts.push('_Please review before merging_');
   slackBlocks.push({
     type: 'context',
-    elements: [{ type: 'mrkdwn', text: ':eyes: _Please review the draft PRs before merging_' }],
+    elements: [{ type: 'mrkdwn', text: footerParts.join('  ·  ') }],
   });
 
   return { jira: jiraLines.join('\n'), slack: slackBlocks };
 }
 
-/**
- * Build a rejection report.
- */
+// ─────────────────────────────────────────────────
+// Rejection Report
+// ─────────────────────────────────────────────────
+
 export function buildRejectionReport(reason, phase, ticketData) {
-  const jira = `### Dr. Asthana — Ticket rejected (${phase})\n\n**Reason:** ${reason}\n\n**Ticket:** ${ticketData.key} — ${ticketData.summary}`;
+  const jira = `### Cannot Process Ticket\n\n${reason}`;
   return { jira, slack: null };
 }
 
-/**
- * Build a failure report.
- */
-export function buildFailureReport(error, step, ticketData, artifactUrl) {
-  const errorSummary = safeSummarise(typeof error === 'string' ? error : error.message, {
-    preset: 'slack-message',
-    label: 'failure-error',
-  });
+// ─────────────────────────────────────────────────
+// Failure Report — JIRA + Slack
+// ─────────────────────────────────────────────────
 
+export function buildFailureReport(error, step, ticketData, artifactUrl) {
+  const errorMsg = typeof error === 'string' ? error : error.message;
+  const briefError = errorMsg.length > 300 ? errorMsg.substring(0, 297) + '...' : errorMsg;
+
+  // JIRA: simple
   const jiraLines = [
-    `### Dr. Asthana — Failed`,
+    `### Could Not Complete`,
     '',
-    `**Step:** ${step}`,
-    `**Error:** ${errorSummary}`,
+    `Something went wrong while processing this ticket.`,
+    '',
+    `**What happened:** ${briefError}`,
   ];
   if (artifactUrl) {
-    jiraLines.push(`**Run Artifact:** [View run artifact](${artifactUrl})`);
+    jiraLines.push('');
+    jiraLines.push(`[View full report](${artifactUrl})`);
   }
 
+  // Slack: brief
   const slackBlocks = [
     {
       type: 'header',
-      text: { type: 'plain_text', text: ':warning: Dr. Asthana Failed', emoji: true },
+      text: { type: 'plain_text', text: 'Could not complete ticket', emoji: true },
     },
     {
       type: 'section',
       text: {
         type: 'mrkdwn',
-        text: sanitizeForSlack(`*Ticket:* ${ticketData.key}\n*Summary:* ${ticketData.summary}\n*Error:*\n\`\`\`${errorSummary}\`\`\``),
+        text: sanitizeForSlack(`*${ticketData.key}* — ${ticketData.summary}\n\n${briefError}`),
       },
     },
-    ...(artifactUrl ? [{
-      type: 'context',
-      elements: [{ type: 'mrkdwn', text: sanitizeForSlack(`:package: <${artifactUrl}|View run artifact>`) }],
-    }] : []),
-    {
-      type: 'context',
-      elements: [{ type: 'mrkdwn', text: ':point_right: _Manual intervention may be required_' }],
-    },
   ];
+
+  const footerParts = [];
+  if (artifactUrl) footerParts.push(`<${artifactUrl}|Full report>`);
+  footerParts.push('_May need manual intervention_');
+  slackBlocks.push({
+    type: 'context',
+    elements: [{ type: 'mrkdwn', text: footerParts.join('  ·  ') }],
+  });
 
   return { jira: jiraLines.join('\n'), slack: slackBlocks };
 }
 
-/**
- * Build In-Progress comment (JIRA only).
- */
+// ─────────────────────────────────────────────────
+// In-Progress Comment (JIRA only)
+// ─────────────────────────────────────────────────
+
 export function buildInProgressComment(config, ticket) {
   const lines = [];
-  lines.push('### Dr. Asthana — Starting implementation');
+  lines.push('### Starting Work');
   lines.push('');
-  lines.push(`**Summary:** ${ticket.summary}`);
+  lines.push(`Working on: **${ticket.affectedSystems.join(', ')}** — targeting \`${ticket.targetBranch}\``);
   lines.push('');
 
   if (ticket.description && ticket.description !== 'No description provided') {
-    const descriptionSummary = safeSummarise(ticket.description, {
-      preset: 'jira-comment',
-      label: 'in-progress-description',
-    });
-    lines.push(`**Description:** ${descriptionSummary}`);
-    lines.push('');
+    const brief = safeSummarise(ticket.description, { limit: 300, label: 'in-progress-desc' });
+    lines.push(brief);
   }
-
-  if (ticket.affectedSystems && ticket.affectedSystems.length > 0) {
-    const branches = ticket.targetBranches && ticket.targetBranches.length > 1
-      ? ticket.targetBranches.map(tb => tb.branch)
-      : [ticket.targetBranch].filter(Boolean);
-
-    lines.push('| Service | Repository | Target Branch(es) |');
-    lines.push('| --- | --- | --- |');
-    for (const system of ticket.affectedSystems) {
-      const serviceConfig = config.services[system] || {};
-      lines.push(`| ${system} | ${serviceConfig.repo || system} | ${branches.join(', ') || 'N/A'} |`);
-    }
-    lines.push('');
-  }
-
-  lines.push(`**Scope:** ${ticket.affectedSystems.length} service(s) — ${ticket.affectedSystems.join(', ')}`);
 
   return { jira: lines.join('\n'), slack: null };
 }
 
-/**
- * Build LEAD REVIEW comment (JIRA only).
- */
-export function buildLeadReviewComment(config, allPRs, cheatsheetSummary) {
-  const azdoBase = config.azureDevOps.org;
-  const project = config.azureDevOps.project;
-  const lines = [];
+// ─────────────────────────────────────────────────
+// Lead Review Comment (JIRA only)
+// ─────────────────────────────────────────────────
 
-  lines.push('### Dr. Asthana — Implementation complete');
+export function buildLeadReviewComment(config, allPRs, cheatsheetSummary) {
+  const lines = [];
+  lines.push('### Ready for Review');
   lines.push('');
 
+  // Human summary
   if (cheatsheetSummary) {
-    lines.push('#### Implementation Plan');
-    lines.push('');
-    lines.push(safeSummarise(cheatsheetSummary, {
-      preset: 'jira-comment',
-      label: 'lead-review-plan',
-    }));
+    const summary = buildHumanSummary(cheatsheetSummary, 500);
+    lines.push(summary);
     lines.push('');
   }
 
+  // PR links
   if (allPRs.length > 0) {
-    lines.push('| Service | Branch | PR |');
-    lines.push('| --- | --- | --- |');
     for (const pr of allPRs) {
-      const repo = pr.service;
-      const prUrl = pr.prUrl || `${azdoBase}/${project}/_git/${repo}/pullrequest/${pr.prId}`;
-      lines.push(`| ${repo} | ${pr.baseBranch} | [#${pr.prId}](${prUrl}) |`);
+      lines.push(`- [PR #${pr.prId}](${prUrl(config, pr)}) — ${pr.service} / ${pr.baseBranch}`);
     }
   }
 

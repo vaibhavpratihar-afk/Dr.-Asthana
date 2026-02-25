@@ -3,7 +3,7 @@
  *
  * Uses the local `aisum` CLI with presets and falls back to hard truncation.
  * Presets: jira-title (255), jira-description (32000), jira-comment (32000),
- *          slack-message (4000), pr-title (120), pr-description (6000)
+ *          slack-message (500), pr-title (120), pr-description (2500)
  */
 
 import { execFileSync } from 'child_process';
@@ -46,7 +46,7 @@ export function summariseText(text, { preset, limit, label = 'text' } = {}) {
     'jira-title': 255,
     'jira-description': 32000,
     'jira-comment': 32000,
-    'slack-message': 4000,
+    'slack-message': 500,
     'pr-title': 120,
     'pr-description': 2500,
   };

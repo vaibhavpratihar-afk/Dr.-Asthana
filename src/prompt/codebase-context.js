@@ -124,11 +124,17 @@ function buildReferencedFilesContext(cloneDir, filePaths, maxPerFile = 2000, max
 export function buildCodebaseContext(cloneDir, options = {}) {
   const lines = [];
 
-  // Read instruction files
-  for (const f of ['CLAUDE.md', 'CODEX.md', 'codex.md']) {
+  // Read instruction files — these contain the service's authoritative rules for testing and building
+  let hasServiceRules = false;
+  for (const f of ['CLAUDE.md', 'CODEX.md', 'codex.md', 'README.md']) {
     const content = readFileIfExists(path.join(cloneDir, f));
     if (content) {
-      lines.push(`## ${f} (Service Rules)`);
+      if (!hasServiceRules) {
+        lines.push('## Service Rules (IMPORTANT — follow these for testing and validation)');
+        lines.push('');
+        hasServiceRules = true;
+      }
+      lines.push(`### ${f}`);
       lines.push('```');
       lines.push(content.substring(0, 3000));
       lines.push('```');

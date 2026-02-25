@@ -84,16 +84,16 @@ clean.sh                  → Cleanup utility: ./clean.sh (all) or ./clean.sh <K
 1. Agent polls JIRA for tickets with the configured trigger label.
 2. Fetches and parses ticket details (title, description, comments, affected systems, fix versions).
 3. Validates required fields (content, structure, scope, service config).
-4. **Transitions ticket to In-Progress** and posts a JIRA comment with scope details.
+4. **Transitions ticket to In-Progress** and posts a JIRA comment (both non-blocking, independent).
 5. For each affected service x target branch:
    a. Clones the repo, creates a feature branch, injects agent rules.
-   b. **Council phase** — a proposer explores the codebase; adversarial critics must find 3+ concrete issues (missing files/tests, broken refs, incomplete removal). Agreement requires all valid critiques addressed. Runs 1-3 rounds.
+   b. **Council phase** — a proposer explores the codebase (follows the service's own CLAUDE.md/codex.md for test commands); adversarial critics must find 3+ concrete issues (missing files/tests, broken refs, test infrastructure, incomplete removal). AGREED = plan already covers critiques without changes; DISAGREE = plan needs revision (triggers next round). Runs 1-3 rounds.
    c. **Evaluate** — quality gate runs structural pre-checks + AI evaluator, extracts a clean cheatsheet.
    d. **Execute** — cheap model follows the cheatsheet exactly (static prompt + guardrails).
    e. **Validate** — critical issues (empty diff, missing tests, <50% completion) trigger retry. Warnings (broken imports, TODO/FIXME) flagged in PR. Structural diff review catches invalid JSON, dangling references.
-   f. Commits, pushes (force if needed), handles base image tagging, opens a PR on Azure DevOps (cheatsheet summary + diff stats + validation warnings in description, capped at 4000 chars).
+   f. Commits, pushes (force if needed), handles base image tagging, opens a PR on Azure DevOps (approach summary + file change list + diff stats + review notes, capped at 4000 chars).
 6. **Transitions ticket to LEAD REVIEW** (if PRs were created).
-7. Posts final JIRA comment with PR table, sends Slack DM, uploads run log to CDN, updates labels.
+7. Bundles run artifact to CDN. Posts plain-English JIRA comment and concise Slack DM (both always fire, even if transitions fail). Updates labels.
 
 ## Council Module
 

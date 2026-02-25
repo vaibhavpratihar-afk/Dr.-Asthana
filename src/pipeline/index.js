@@ -79,15 +79,17 @@ export async function runPipeline(config, ticketOrKey) {
     saveCheckpoint(ticketKey, STEPS.VALIDATE_TICKET, { ticketData: ticket });
     endStep(true, 'All required fields present');
 
-    // Transition to In-Progress + comment
+    // Transition to In-Progress + comment (both non-blocking, independent)
     try {
-      const transitioned = await transitionToInProgress(config, ticketKey);
-      if (transitioned) {
-        await postInProgressComment(config, ticketKey, ticket);
-        log(`In-Progress transition and comment posted for ${ticketKey}`);
-      }
+      await transitionToInProgress(config, ticketKey);
     } catch (e) {
       warn(`In-Progress transition failed (non-blocking): ${e.message}`);
+    }
+    try {
+      await postInProgressComment(config, ticketKey, ticket);
+      log(`In-Progress comment posted for ${ticketKey}`);
+    } catch (e) {
+      warn(`In-Progress comment failed (non-blocking): ${e.message}`);
     }
 
     // ══════ Steps 3-7: Single service, single branch ══════
@@ -145,14 +147,16 @@ export async function runPipeline(config, ticketOrKey) {
       return { success: false, reason: 'no_prs_created' };
     }
 
-    // Transition to LEAD REVIEW
+    // Transition to LEAD REVIEW + comment (both non-blocking, independent)
     try {
-      const transitionResult = await transitionToLeadReview(config, ticketKey);
-      if (transitionResult.emReviewDone) {
-        await postLeadReviewComment(config, ticketKey, allPRs, cheatsheetSummary);
-      }
+      await transitionToLeadReview(config, ticketKey);
     } catch (e) {
       warn(`LEAD REVIEW transition failed (non-blocking): ${e.message}`);
+    }
+    try {
+      await postLeadReviewComment(config, ticketKey, allPRs, cheatsheetSummary);
+    } catch (e) {
+      warn(`Lead review comment failed (non-blocking): ${e.message}`);
     }
 
     // Post final JIRA comment
