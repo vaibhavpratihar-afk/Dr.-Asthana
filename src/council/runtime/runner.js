@@ -19,13 +19,12 @@ import { warn } from '../../utils/logger.js';
  * @param {string} opts.label - Log label for this call
  * @param {number} opts.agentIndex - Index in the agents array
  * @param {object[]} opts.agents - Resolved agent configs
- * @param {boolean} opts.useProviderConfig - Whether to pass per-agent provider config
  * @param {Map} opts.sessions - Session ID map (agent index → session ID) for memory
  * @param {object} opts.config - Full config object
  * @param {string} opts.councilLabel - Council label for log filenames
  * @returns {Promise<{output: string, rateLimited: boolean, failed: boolean}>}
  */
-export async function runAgent({ prompt, workingDir, label, agentIndex, agents, useProviderConfig, sessions, config, councilLabel }) {
+export async function runAgent({ prompt, workingDir, label, agentIndex, agents, sessions, config, councilLabel }) {
   try {
     const result = await runAI({
       prompt,
@@ -35,7 +34,7 @@ export async function runAgent({ prompt, workingDir, label, agentIndex, agents, 
       logDir: config.agent.logDir,
       ticketKey: councilLabel,
       config,
-      providerConfig: useProviderConfig ? agents[agentIndex] : undefined,
+      providerConfig: agents[agentIndex],
       resumeSessionId: sessions.get(agentIndex) || undefined,
     });
 

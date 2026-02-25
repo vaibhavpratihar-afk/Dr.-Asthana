@@ -78,6 +78,7 @@ export function loadConfig() {
       logDir: raw.agent?.logDir || './logs',
       executionRetries: raw.agent?.executionRetries ?? 1,
     },
+    council: buildCouncilConfig(raw),
     aiProvider: buildAiProviderConfig(raw),
     infra: {
       enabled: raw.infra?.enabled ?? false,
@@ -111,6 +112,42 @@ function buildModeConfig(modeRaw, defaults) {
   };
 }
 
+function buildCouncilConfig(raw) {
+  const councilRaw = raw.council || {};
+  const normalizeMember = (member, defaults) => ({
+    provider: member?.provider || defaults.provider,
+    model: member?.model || defaults.model,
+    maxTurns: member?.maxTurns || defaults.maxTurns,
+    timeoutMinutes: member?.timeoutMinutes || defaults.timeoutMinutes,
+    allowedTools: member?.allowedTools || defaults.allowedTools,
+  });
+  const debateDefaults = {
+    provider: 'claude',
+    model: 'sonnet',
+    maxTurns: 15,
+    timeoutMinutes: 10,
+    allowedTools: 'Read,Glob,Grep',
+  };
+  const evaluateDefaults = {
+    provider: 'claude',
+    model: 'sonnet',
+    maxTurns: 5,
+    timeoutMinutes: 5,
+    allowedTools: 'Read,Glob,Grep',
+  };
+  const proposer = normalizeMember(councilRaw.proposer, debateDefaults);
+  const critics = Array.isArray(councilRaw.critics) && councilRaw.critics.length > 0
+    ? councilRaw.critics.map((critic) => normalizeMember(critic, debateDefaults))
+    : [normalizeMember(null, debateDefaults)];
+  const evaluator = normalizeMember(councilRaw.evaluator, evaluateDefaults);
+  return {
+    maxRounds: councilRaw.maxRounds || 3,
+    proposer,
+    critics,
+    evaluator,
+  };
+}
+
 function buildAiProviderConfig(raw) {
   const ai = raw.aiProvider || {};
 
@@ -121,25 +158,7 @@ function buildAiProviderConfig(raw) {
     }),
   };
 
-  const debate = {
-    ...buildModeConfig(ai.debate, {
-      claudeModel: 'sonnet', claudeMaxTurns: 15, claudeTimeout: 10,
-      codexTimeout: 10, allowedTools: 'Read,Glob,Grep',
-    }),
-    maxRounds: ai.debate?.maxRounds || 3,
-    ...(Array.isArray(ai.debate?.debaters) && { debaters: ai.debate.debaters }),
-  };
-
-  const evaluate = {
-    ...buildModeConfig(ai.evaluate, {
-      claudeModel: 'sonnet', claudeMaxTurns: 5, claudeTimeout: 5,
-      codexTimeout: 5, allowedTools: 'Read,Glob,Grep',
-    }),
-    ...(Array.isArray(ai.evaluate?.evaluators) && { evaluators: ai.evaluate.evaluators }),
-    ...(ai.evaluate?.strategy && { strategy: ai.evaluate.strategy }),
-  };
-
-  return { strategy: ai.strategy || 'single', execute, debate, evaluate };
+  return { strategy: ai.strategy || 'single', execute };
 }
 
 /**

@@ -144,14 +144,15 @@ Edit `config.json` in the project root. See `config.example.json` for the full s
 |---|---|
 | `jira` | baseUrl, email, apiToken, trigger label, done label, custom field IDs |
 | `azureDevOps` | org URL, project, SSH repo base URL |
-| `services` | map of service name -> { repo, component, componentId, lead } |
+| `services` | map of service name -> { repo } |
 | `slack` | botToken, userId for DM notifications |
 | `agent` | pollInterval (300s), maxTicketsPerCycle (1), logDir, executionRetries |
-| `aiProvider` | strategy, per-mode config (execute, debate, evaluate) |
+| `aiProvider` | execute strategy + execute-mode provider settings |
+| `council` | council runtime config: `maxRounds`, `proposer`, `critics`, `evaluator` |
 | `infra` | enabled, scriptsDir, stopAfterProcessing |
 | `tests` | enabled |
 
-Provider can be set per mode (`execute`, `debate`, `evaluate`) to either `claude` or `codex`.
+Provider can be set per council role (`proposer`, `critics[*]`, `evaluator`) to either `claude` or `codex`.
 
 ## Artifacts
 

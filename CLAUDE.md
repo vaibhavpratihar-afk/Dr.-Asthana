@@ -97,7 +97,7 @@ src/
     summariser.js         → aisum wrapper for length-safe summaries
 agent-rules-with-tests.md  → Standing rules injected into clone's CLAUDE.md when tests enabled
 agent-rules-no-tests.md    → Standing rules injected when tests handled externally
-config.json                → Runtime configuration (JIRA, Azure DevOps, services, Slack, aiProvider)
+config.json                → Runtime configuration (JIRA, Azure DevOps, services, Slack, aiProvider, council)
 clean.sh                   → Cleanup utility: ./clean.sh (all) or ./clean.sh <KEY> (specific ticket)
 ```
 
@@ -298,10 +298,11 @@ All JIRA write operations route through `jira-cli.mjs` via `jira/transitions.js`
 Key sections:
 - `jira` — baseUrl, email, apiToken, label, labelProcessed, custom field IDs
 - `azureDevOps` — org, project, repoBaseUrl (SSH)
-- `services` — map of service name to { repo, component, componentId, lead }
+- `services` — map of service name to { repo }
 - `slack` — botToken, userId
 - `agent` — pollInterval (300s), maxTicketsPerCycle (1), logDir, executionRetries
-- `aiProvider` — strategy, per-mode config (execute, debate, evaluate) with provider-specific settings
+- `aiProvider` — strategy + execute-mode provider settings
+- `council` — `maxRounds`, `proposer`, `critics`, `evaluator`
 - `infra` — enabled, scriptsDir, stopAfterProcessing
 - `tests` — enabled
 

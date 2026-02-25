@@ -54,8 +54,8 @@ export async function evaluate(councilOutput, evalOpts, force = false) {
     return { passed: false, feedback: structuralResult.feedback, output: null };
   }
 
-  // Resolve evaluator list from config
-  const evalConfig = config.aiProvider?.evaluate || {};
+  // Resolve evaluator list from council config
+  const evalConfig = config.council?.evaluator || null;
   const evaluators = resolveEvaluators(evalConfig);
 
   const prompt = buildAiPrompt(councilOutput, context, force);
@@ -76,7 +76,7 @@ export async function evaluate(councilOutput, evalOpts, force = false) {
         logDir: config.agent.logDir,
         ticketKey: label,
         config,
-        providerConfig: evalConfig.evaluators ? evConfig : undefined,
+        providerConfig: evConfig,
       });
 
       const rawOutput = result.output || '';
@@ -123,16 +123,12 @@ export async function evaluate(councilOutput, evalOpts, force = false) {
 }
 
 /**
- * Resolve evaluator list from config.
- * If evaluators[] array exists, use it. Otherwise build single-element array from legacy config.
+ * Resolve evaluator list from council config.
  */
 export function resolveEvaluators(evalConfig) {
-  if (Array.isArray(evalConfig.evaluators) && evalConfig.evaluators.length > 0) {
-    return evalConfig.evaluators;
-  }
-  const provider = evalConfig.provider || 'claude';
-  const providerSettings = evalConfig[provider] || {};
-  return [{ provider, ...providerSettings }];
+  if (Array.isArray(evalConfig) && evalConfig.length > 0) return evalConfig;
+  if (evalConfig && typeof evalConfig === 'object') return [evalConfig];
+  return [{ provider: 'claude', model: 'sonnet', maxTurns: 5, timeoutMinutes: 5, allowedTools: 'Read,Glob,Grep' }];
 }
 
 /**

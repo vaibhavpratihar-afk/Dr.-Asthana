@@ -20,10 +20,9 @@ import { log } from '../../utils/logger.js';
  * @returns {Promise<{passed: boolean, output: string|null, feedback: string|null, rounds: number}>}
  */
 export async function runCouncil({ goal, context, workingDir, roles, prompts, evaluation, config, label, checkpointDir, initialFeedback }) {
-  const debateConfig = config.aiProvider?.debate || {};
-  const maxRounds = debateConfig.maxRounds || 3;
-  const agents = resolveAgents(debateConfig);
-  const useProviderConfig = Array.isArray(debateConfig.debaters) && debateConfig.debaters.length >= 2;
+  const councilConfig = config.council || {};
+  const maxRounds = councilConfig.maxRounds || 3;
+  const agents = resolveAgents(councilConfig);
 
   log(`Council: ${agents.length} agents, ${maxRounds} max rounds, goal: ${goal.substring(0, 80)}...`);
   for (let i = 0; i < agents.length; i++) {
@@ -33,7 +32,7 @@ export async function runCouncil({ goal, context, workingDir, roles, prompts, ev
   const baseContext = `${context}\n\n## Goal\n\n${goal}`;
   const workspace = initWorkspace(checkpointDir, label, maxRounds);
   const sessions = new Map();
-  const agentOpts = { agents, useProviderConfig, sessions, config, councilLabel: label, workingDir };
+  const agentOpts = { agents, sessions, config, councilLabel: label, workingDir };
   const evalOpts = { ...evaluation, context, config, label };
 
   let proposerOutput = '';
