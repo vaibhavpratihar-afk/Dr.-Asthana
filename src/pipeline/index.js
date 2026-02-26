@@ -362,6 +362,13 @@ async function processServiceBranch(config, ticket, serviceConfig, repoUrl, tick
       break;
     }
 
+    // Block shipping if critical validation issues remain after all attempts
+    if (validationResult?.critical?.length > 0) {
+      const criticalMsg = validationResult.critical.join(', ');
+      warn(`Blocking ship: critical validation issues unresolved — ${criticalMsg}`);
+      return { pr: null, error: `Critical validation failure: ${criticalMsg}`, cheatsheetSummary: cheatsheet };
+    }
+
     // Step 7: SHIP
     startStep(7, `Commit and push ${serviceConfig.repo}/${baseBranch}`);
     const { pushed } = await commitAndPush(tmpDir, featureBranch, ticketKey, ticket.summary, serviceHasInstructionFile, instructionFile);
