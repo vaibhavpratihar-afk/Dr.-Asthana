@@ -22,17 +22,16 @@ import {
   postFinalJiraReport,
   notifySlackSuccess,
   notifySlackFailure,
-  notifySlackRejection,
   postInProgressComment,
   postLeadReviewComment,
 } from '../notification/index.js';
-import { startServices, stopServices } from '../infra/index.js';
+import { stopServices } from '../infra/index.js';
 import { saveCheckpoint, loadCheckpoint, clearCheckpoint, getCheckpointPath } from './checkpoint.js';
 import { bundleRunArtifact } from './bundler.js';
-import { STEPS, STEP_ORDER, getStepNumber } from './steps.js';
+import { STEPS, getStepNumber } from './steps.js';
 import * as logger from '../utils/logger.js';
 
-const { log, ok, warn, err, debug, logData, startStep, endStep, initRun, finalizeRun, getRunLogPaths } = logger;
+const { log, ok, warn, err, startStep, endStep, initRun, finalizeRun, getRunLogPaths } = logger;
 
 /**
  * Run the full pipeline for a ticket.
@@ -414,4 +413,3 @@ async function processServiceBranch(config, ticket, serviceConfig, repoUrl, tick
     }
   }
 }
-

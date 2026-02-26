@@ -125,7 +125,7 @@ export async function evaluate(councilOutput, evalOpts, force = false) {
 /**
  * Resolve evaluator list from council config.
  */
-export function resolveEvaluators(evalConfig) {
+function resolveEvaluators(evalConfig) {
   if (Array.isArray(evalConfig) && evalConfig.length > 0) return evalConfig;
   if (evalConfig && typeof evalConfig === 'object') return [evalConfig];
   return [{ provider: 'claude', model: 'sonnet', maxTurns: 5, timeoutMinutes: 5, allowedTools: 'Read,Glob,Grep' }];
@@ -135,7 +135,7 @@ export function resolveEvaluators(evalConfig) {
  * Extract content between configurable markers.
  * Falls back to extracting everything after the approval keyword.
  */
-export function extractByMarkers(output, markers) {
+function extractByMarkers(output, markers) {
   const { start, end } = markers;
   const startIdx = output.indexOf(start);
   const endIdx = output.indexOf(end);
@@ -150,7 +150,7 @@ export function extractByMarkers(output, markers) {
 /**
  * Extract feedback text after a configurable marker.
  */
-export function extractFeedback(output, marker, rejectionKeyword) {
+function extractFeedback(output, marker, rejectionKeyword) {
   const idx = output.indexOf(marker);
   if (idx !== -1) {
     return output.substring(idx + marker.length).trim();

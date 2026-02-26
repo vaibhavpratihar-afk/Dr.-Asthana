@@ -9,7 +9,6 @@
  */
 
 import { summariseText } from '../utils/summariser.js';
-import { execSync } from 'child_process';
 import { warn } from '../utils/logger.js';
 
 /** Max chars for a single Slack Block Kit mrkdwn text field. */
@@ -60,24 +59,6 @@ function buildHumanSummary(cheatsheet, limit = 300) {
 function prUrl(config, pr) {
   if (pr.prUrl) return pr.prUrl;
   return `${config.azureDevOps.org}/${config.azureDevOps.project}/_git/${pr.service}/pullrequest/${pr.prId}`;
-}
-
-/**
- * Upload a log file to Pixelbin CDN and return the URL.
- */
-export function uploadLogFile(logFilePath) {
-  if (!logFilePath) return null;
-  try {
-    const output = execSync(
-      `~/.local/bin/pixelbin-upload ${logFilePath} --json --unique --format raw --no-progress`,
-      { encoding: 'utf-8', timeout: 30000, shell: '/bin/bash' }
-    );
-    const parsed = JSON.parse(output);
-    return parsed.url || parsed.cdnUrl || null;
-  } catch (error) {
-    warn(`Log file upload failed (non-blocking): ${error.message}`);
-    return null;
-  }
 }
 
 /**
@@ -174,15 +155,6 @@ export function buildFinalReport(config, allPRs, allFailures, cheatsheetSummary,
   });
 
   return { jira: jiraLines.join('\n'), slack: slackBlocks };
-}
-
-// ─────────────────────────────────────────────────
-// Rejection Report
-// ─────────────────────────────────────────────────
-
-export function buildRejectionReport(reason, phase, ticketData) {
-  const jira = `### Cannot Process Ticket\n\n${reason}`;
-  return { jira, slack: null };
 }
 
 // ─────────────────────────────────────────────────

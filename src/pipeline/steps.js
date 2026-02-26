@@ -32,10 +32,3 @@ export function getStepNumber(stepName) {
   const step = STEP_ORDER.find(s => s.name === stepName);
   return step ? step.number : 0;
 }
-
-/**
- * Get step index (0-based) from step name.
- */
-export function getStepIndex(stepName) {
-  return STEP_ORDER.findIndex(s => s.name === stepName);
-}

@@ -10,12 +10,11 @@ import { sendDM } from './slack.js';
 import {
   buildStepReport,
   buildFinalReport,
-  buildRejectionReport,
   buildFailureReport,
   buildInProgressComment,
   buildLeadReviewComment,
 } from './report.js';
-import { log, warn } from '../utils/logger.js';
+import { warn } from '../utils/logger.js';
 
 /**
  * Post a step comment to JIRA (fire-and-forget).
@@ -69,23 +68,6 @@ export async function notifySlackFailure(config, ticketKey, ticketData, error, a
   if (report.slack) {
     await sendDM(config, report.slack, `Dr. Asthana failed for ${ticketKey}: ${typeof error === 'string' ? error : error.message}`);
   }
-}
-
-/**
- * Send Slack rejection notification.
- */
-export async function notifySlackRejection(config, ticketKey, reason) {
-  const blocks = [
-    {
-      type: 'header',
-      text: { type: 'plain_text', text: ':no_entry: Dr. Asthana — Ticket Rejected', emoji: true },
-    },
-    {
-      type: 'section',
-      text: { type: 'mrkdwn', text: `*Ticket:* <${config.jira.baseUrl}/browse/${ticketKey}|${ticketKey}>\n*Reason:* ${reason}` },
-    },
-  ];
-  await sendDM(config, blocks, `Dr. Asthana rejected ${ticketKey}: ${reason}`);
 }
 
 /**

@@ -16,7 +16,6 @@ import { run as runFallback } from './strategies/fallback.js';
 import { run as runParallel } from './strategies/parallel.js';
 import { run as runRace } from './strategies/race.js';
 import { log, warn } from '../utils/logger.js';
-import { execSync } from 'child_process';
 
 const ADAPTERS = {
   claude: claudeAdapter,
@@ -136,22 +135,4 @@ export function getProviderLabel(config) {
   const provider = execConfig.provider || 'claude';
   const model = execConfig[provider]?.model || 'default';
   return `${provider} (${model}) [${strategy}]`;
-}
-
-/**
- * Check if a provider's CLI is available on PATH.
- *
- * @param {string} provider - 'claude' or 'codex'
- * @returns {Promise<boolean>}
- */
-export async function checkProviderAvailable(provider) {
-  const adapter = ADAPTERS[provider];
-  if (!adapter) return false;
-
-  try {
-    execSync(`which ${adapter.getCommand()}`, { stdio: 'pipe' });
-    return true;
-  } catch {
-    return false;
-  }
 }

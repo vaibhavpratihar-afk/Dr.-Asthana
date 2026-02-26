@@ -5,8 +5,6 @@
  * --output-format stream-json CLI.
  */
 
-export const name = 'claude';
-
 /**
  * Build CLI arguments for Claude Code.
  *

@@ -7,7 +7,6 @@
  */
 
 import fs from 'fs';
-import path from 'path';
 import { execSync } from 'child_process';
 import { isGarbageOutput, pickBestOutput, buildResult, buildFailureResult } from '../provider.js';
 import { log, warn } from '../../utils/logger.js';

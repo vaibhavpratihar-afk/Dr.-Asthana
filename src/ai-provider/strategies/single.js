@@ -25,7 +25,7 @@ export async function run(prompt, workingDir, modeConfig, adapters, spawnFn, opt
     ...(modeConfig[providerName] || {}),
     ...(options.resumeSessionId && { resumeSessionId: options.resumeSessionId }),
   };
-  const { args, timeout, maxTurns } = adapter.buildArgs(prompt, providerConfig);
+  const { args, timeout } = adapter.buildArgs(prompt, providerConfig);
 
   const raw = await spawnFn({
     command: adapter.getCommand(),

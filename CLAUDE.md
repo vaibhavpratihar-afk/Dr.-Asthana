@@ -39,7 +39,7 @@ This project uses **pnpm**. Do not use npm or yarn.
 src/
   index.js                → CLI entry point (daemon, single, dry-run, resume)
   ai-provider/
-    index.js              → Public API: runAI(), getProviderLabel(), checkProviderAvailable()
+    index.js              → Public API: runAI(), getProviderLabel()
     provider.js           → Public facade (stable exports used by strategies/council)
     provider/             → Internal runtime (spawn-runtime, event-parser, log-writer, result-utils)
     adapters/

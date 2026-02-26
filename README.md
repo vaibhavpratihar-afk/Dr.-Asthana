@@ -50,7 +50,7 @@ The **cheatsheet** is the most valuable artifact. It's persisted to disk so fail
 src/
   index.js                → CLI entry point (daemon, single, dry-run, resume)
   ai-provider/            → Sole interface for spawning AI CLIs
-    index.js              → runAI(), getProviderLabel(), checkProviderAvailable()
+    index.js              → runAI(), getProviderLabel()
     provider.js           → Public facade (stable exports used by strategies/council)
     provider/             → Internal runtime pieces (spawn-runtime, event-parser, log-writer, result-utils)
     adapters/             → Claude Code and Codex CLI adapters

@@ -31,7 +31,6 @@ export async function run(prompt, workingDir, modeConfig, adapters, spawnFn, opt
   // Use Promise.any-like approach: resolve when first good result arrives
   return new Promise((resolve, reject) => {
     let settled = false;
-    const pending = [];
     const results = [];
 
     const tryResolve = (result) => {

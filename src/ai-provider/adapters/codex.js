@@ -6,8 +6,6 @@
  * Falls back to `--quiet` mode when structured output isn't needed.
  */
 
-export const name = 'codex';
-
 /**
  * Build CLI arguments for Codex.
  *

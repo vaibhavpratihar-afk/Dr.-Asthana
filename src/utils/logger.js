@@ -25,10 +25,8 @@ const COLORS = {
   white: '\x1b[37m',
   bgRed: '\x1b[41m',
   bgGreen: '\x1b[42m',
-  bgYellow: '\x1b[43m',
   bgBlue: '\x1b[44m',
   bgMagenta: '\x1b[45m',
-  bgCyan: '\x1b[46m',
 };
 
 // Global state
@@ -82,20 +80,8 @@ export function initRun(ticketKey, logDirectory = './logs') {
   return currentRunId;
 }
 
-export function getRunId() {
-  return currentRunId;
-}
-
-export function getRunLogPath() {
-  return runLogPath;
-}
-
 export function getRunLogPaths() {
   return { runLog: runLogPath, errorLog: errorLogPath };
-}
-
-export function setDebugMode(enabled) {
-  debugMode = enabled;
 }
 
 function getTimestamp() {
@@ -245,28 +231,4 @@ export function logData(label, data) {
   const indented = dataStr.split('\n').map(l => `  ${COLORS.dim}${l}${COLORS.reset}`).join('\n');
   console.log(indented);
   writeToFile('DATA', `${label}: ${dataStr}`);
-}
-
-export function logApi(method, url, statusCode, duration) {
-  const statusColor = statusCode >= 400 ? COLORS.red : COLORS.green;
-  const methodColor = `${COLORS.bold}${COLORS.cyan}${method}${COLORS.reset}`;
-  const statusBadge = `${statusColor}${COLORS.bold}${statusCode}${COLORS.reset}`;
-  console.log(`${COLORS.dim}${getShortTimestamp()}${COLORS.reset} ${COLORS.bold}[API]${COLORS.reset} ${methodColor} ${url} ${statusBadge} ${COLORS.dim}${duration}ms${COLORS.reset}`);
-  writeToFile('API', `${method} ${url} -> ${statusCode} (${duration}ms)`, statusCode >= 400);
-}
-
-export function logCmd(command, exitCode = 0, duration = 0) {
-  const truncatedCmd = command.length > 100 ? command.substring(0, 100) + '...' : command;
-  const exitColor = exitCode !== 0 ? COLORS.red : COLORS.green;
-  console.log(`${COLORS.dim}${getShortTimestamp()}${COLORS.reset} ${COLORS.bold}[CMD]${COLORS.reset} ${COLORS.dim}$${COLORS.reset} ${truncatedCmd} ${exitColor}${COLORS.bold}exit ${exitCode}${COLORS.reset} ${COLORS.dim}${duration}ms${COLORS.reset}`);
-  writeToFile('CMD', `$ ${truncatedCmd} -> exit ${exitCode} (${duration}ms)`, exitCode !== 0);
-}
-
-export function getErrorSummary() {
-  if (!errorLogPath || !fs.existsSync(errorLogPath)) {
-    return 'No errors logged';
-  }
-  const content = fs.readFileSync(errorLogPath, 'utf-8');
-  const lines = content.split('\n').filter(Boolean);
-  return `${lines.length} error(s) logged. See: ${errorLogPath}`;
 }

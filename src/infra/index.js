@@ -9,7 +9,7 @@ import { log, warn, err } from '../utils/logger.js';
 
 const SCRIPT_TIMEOUT = 2 * 60 * 1000;
 
-export function checkServicesRunning() {
+function checkServicesRunning() {
   try {
     execSync('lsof -i:27017', { stdio: 'pipe' });
     execSync('lsof -i:6379', { stdio: 'pipe' });
