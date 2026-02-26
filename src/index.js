@@ -1,54 +1,44 @@
 #!/usr/bin/env node
 
 /**
- * Dr. Asthana - CLI Entry Point
+ * Dr. Asthana v2 - CLI Entry Point
  *
  * Commands:
- *   daemon          Run the poll loop continuously
- *   single <KEY>    Process one specific ticket
- *   dry-run         Poll once, log what would happen, don't execute
+ *   daemon                      Run the poll loop continuously
+ *   single <KEY>                Process one specific ticket
+ *   dry-run                     Poll once, log what would happen, don't execute
+ *   resume <KEY> --from-step=N  Resume a failed run from a specific step
  */
 
-import { loadConfig } from './config.js';
-import { getTicketDetails } from './services/jira.js';
-import { searchTickets } from './services/jira-transitions.js';
-import { processTicket } from './agent/processor.js';
-import { parseTicket, displayTicketDetails } from './agent/ticket.js';
-import { log, ok, warn, err } from './logger.js';
-import * as logger from './logger.js';
+import { loadConfig } from './utils/config.js';
+import { getTicketDetails, parseTicket, displayTicketDetails, searchTickets } from './jira/index.js';
+import { runPipeline, resume as resumePipeline } from './pipeline/index.js';
+import { getProviderLabel } from './ai-provider/index.js';
+import { log, ok, warn, err } from './utils/logger.js';
+import * as logger from './utils/logger.js';
 
-/**
- * Sleep for a given number of seconds
- */
 function sleep(seconds) {
   return new Promise((resolve) => setTimeout(resolve, seconds * 1000));
 }
 
-/**
- * Run a single ticket by key
- */
 async function runSingle(config, ticketKey) {
-  log(`Fetching ticket ${ticketKey}...`);
-
+  log(`Processing ticket ${ticketKey}...`);
   try {
-    await processTicket(config, ticketKey);
+    await runPipeline(config, ticketKey);
   } catch (error) {
     err(`Failed to process ${ticketKey}: ${error.message}`);
     process.exit(1);
   }
 }
 
-/**
- * Dry run - poll once and log what would happen
- */
 async function runDryRun(config) {
   log('DRY RUN MODE - No changes will be made');
   log('');
 
   try {
-    const jql = `labels = "${config.JIRA_LABEL}" ORDER BY priority DESC`;
-    const fields = ['summary', 'description', 'comment', 'issuetype', 'priority', 'status', 'labels', config.JIRA_FIELDS.affectedSystems, config.JIRA_FIELDS.fixVersions];
-    const tickets = await searchTickets(jql, config.MAX_TICKETS_PER_CYCLE, fields);
+    const jql = `labels = "${config.jira.label}" ORDER BY priority DESC`;
+    const fields = ['summary', 'description', 'comment', 'issuetype', 'priority', 'status', 'labels', config.jira.fields.affectedSystems, config.jira.fields.fixVersions];
+    const tickets = await searchTickets(jql, config.agent.maxTicketsPerCycle, fields);
 
     if (tickets.length === 0) {
       log('No tickets found matching criteria');
@@ -68,19 +58,14 @@ async function runDryRun(config) {
   }
 }
 
-/**
- * Run the daemon loop
- */
 async function runDaemon(config) {
-  log('╔════════════════════════════════════════════════════════════╗');
-  log('║            Dr. Asthana                                     ║');
-  log('╚════════════════════════════════════════════════════════════╝');
+  log('== Dr. Asthana v2 ==');
   log('');
-  log(`Poll interval:    ${config.POLL_INTERVAL}s`);
-  log(`Max per cycle:    ${config.MAX_TICKETS_PER_CYCLE}`);
-  log(`AI provider:      ${config.AGENT_PROVIDER_LABEL || config.PROVIDER || 'claude'}`);
-  log(`Label:            ${config.JIRA_LABEL}`);
-  log(`Services:         ${Object.keys(config.SERVICES).join(', ')}`);
+  log(`Poll interval:    ${config.agent.pollInterval}s`);
+  log(`Max per cycle:    ${config.agent.maxTicketsPerCycle}`);
+  log(`AI Provider:      ${getProviderLabel(config)}`);
+  log(`Label:            ${config.jira.label}`);
+  log(`Services:         ${Object.keys(config.services).join(', ')}`);
   log('');
 
   let cycleCount = 0;
@@ -89,9 +74,9 @@ async function runDaemon(config) {
     cycleCount++;
     try {
       log(`Checking for new patients (cycle ${cycleCount})...`);
-      const jql = `labels = "${config.JIRA_LABEL}" ORDER BY priority DESC`;
-      const fields = ['summary', 'description', 'comment', 'issuetype', 'priority', 'status', 'labels', config.JIRA_FIELDS.affectedSystems, config.JIRA_FIELDS.fixVersions];
-      const tickets = await searchTickets(jql, config.MAX_TICKETS_PER_CYCLE, fields);
+      const jql = `labels = "${config.jira.label}" ORDER BY priority DESC`;
+      const fields = ['summary', 'description', 'comment', 'issuetype', 'priority', 'status', 'labels', config.jira.fields.affectedSystems, config.jira.fields.fixVersions];
+      const tickets = await searchTickets(jql, config.agent.maxTicketsPerCycle, fields);
 
       if (tickets.length === 0) {
         log('No patients waiting. Shutting down.');
@@ -99,45 +84,45 @@ async function runDaemon(config) {
       }
 
       for (const ticket of tickets) {
-        await processTicket(config, ticket);
+        await runPipeline(config, ticket);
       }
     } catch (error) {
       err(`Poll cycle failed: ${error.message}`);
     }
 
-    log(`\nCycle ${cycleCount} done. Checking again in ${config.POLL_INTERVAL}s...\n`);
-    await sleep(config.POLL_INTERVAL);
+    log(`\nCycle ${cycleCount} done. Checking again in ${config.agent.pollInterval}s...\n`);
+    await sleep(config.agent.pollInterval);
   }
 }
 
-/**
- * Print usage information
- */
+async function runResume(config, ticketKey, fromStep) {
+  log(`Resuming ${ticketKey} from step ${fromStep}...`);
+  try {
+    await resumePipeline(config, ticketKey, fromStep);
+  } catch (error) {
+    err(`Failed to resume ${ticketKey}: ${error.message}`);
+    process.exit(1);
+  }
+}
+
 function printUsage() {
   console.log(`
-╔════════════════════════════════════════════════════════════╗
-║            Dr. Asthana                                     ║
-╚════════════════════════════════════════════════════════════╝
+== Dr. Asthana v2 ==
 
 Usage:
   node src/index.js <command> [options]
 
 Commands:
-  daemon          Run the poll loop continuously
-  single <KEY>    Process one specific ticket (e.g., single JCP-123)
-  dry-run         Poll once, show ticket details, don't execute
+  daemon                      Run the poll loop continuously
+  single <KEY>                Process one specific ticket (e.g., single JCP-123)
+  dry-run                     Poll once, show ticket details, don't execute
+  resume <KEY> --from-step=N  Resume a failed run from a specific step
 
 Configuration:
   Edit config.json in the project root.
-
-Labels:
-  Add your configured JIRA trigger label to tickets for processing.
 `);
 }
 
-/**
- * Main entry point
- */
 async function main() {
   const args = process.argv.slice(2);
   const command = args[0];
@@ -147,7 +132,6 @@ async function main() {
     process.exit(0);
   }
 
-  // Load and validate configuration
   const config = loadConfig();
 
   switch (command) {
@@ -169,6 +153,18 @@ async function main() {
       await runDryRun(config);
       break;
 
+    case 'resume': {
+      const ticketKey = args[1];
+      if (!ticketKey) {
+        err('Missing ticket key. Usage: resume <TICKET-KEY> --from-step=N');
+        process.exit(1);
+      }
+      const fromStepArg = args.find(a => a.startsWith('--from-step='));
+      const fromStep = fromStepArg ? parseInt(fromStepArg.split('=')[1], 10) : 5;
+      await runResume(config, ticketKey, fromStep);
+      break;
+    }
+
     default:
       err(`Unknown command: ${command}`);
       printUsage();
@@ -176,7 +172,6 @@ async function main() {
   }
 }
 
-// Run
 main().catch((error) => {
   err(`Fatal error: ${error.message}`);
   process.exit(1);
