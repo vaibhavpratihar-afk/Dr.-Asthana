@@ -202,3 +202,17 @@ export function getServiceConfig(config, serviceName) {
   }
   return null;
 }
+
+/**
+ * Return a shallow config clone with the requested council profile.
+ *
+ * Useful when a caller needs to run council logic with an alternate
+ * proposer/critic/evaluator setup (e.g. PR review council).
+ */
+export function withCouncilConfig(config, councilOverride) {
+  if (!councilOverride) return config;
+  return {
+    ...config,
+    council: councilOverride,
+  };
+}
