@@ -79,6 +79,7 @@ export function loadConfig() {
       executionRetries: raw.agent?.executionRetries ?? 1,
     },
     council: buildCouncilConfig(raw),
+    prReviewCouncil: buildPrReviewCouncilConfig(raw),
     aiProvider: buildAiProviderConfig(raw),
     infra: {
       enabled: raw.infra?.enabled ?? false,
@@ -113,7 +114,15 @@ function buildModeConfig(modeRaw, defaults) {
 }
 
 function buildCouncilConfig(raw) {
-  const councilRaw = raw.council || {};
+  return buildCouncilConfigSection(raw.council || {});
+}
+
+function buildPrReviewCouncilConfig(raw) {
+  if (!raw.prReviewCouncil) return null;
+  return buildCouncilConfigSection(raw.prReviewCouncil);
+}
+
+function buildCouncilConfigSection(councilRaw = {}) {
   const normalizeMember = (member, defaults) => ({
     provider: member?.provider || defaults.provider,
     model: member?.model || defaults.model,

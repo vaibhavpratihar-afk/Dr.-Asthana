@@ -15,7 +15,7 @@ import { getServiceConfig, getRepoUrl } from '../utils/config.js';
 import { cloneAndBranch, commitAndPush, cleanup } from '../service/index.js';
 import { createPR } from '../service/azure.js';
 import { handleBaseTag } from '../service/base-tagger.js';
-import { buildCheatsheet, validateExecution, reviewDiff } from '../prompt/index.js';
+import { buildCheatsheet, validateExecution, reviewDiff, reviewPullRequest } from '../prompt/index.js';
 import { execute } from '../agent/index.js';
 import {
   postJiraStep,
@@ -356,6 +356,34 @@ async function processServiceBranch(config, ticket, serviceConfig, repoUrl, tick
         validationResult.warnings = [...(validationResult.warnings || []), ...diffReview.warnings];
         validationResult.issues = [...(validationResult.issues || []), ...diffReview.warnings];
         warn(`Diff review warnings: ${diffReview.warnings.join(', ')}`);
+      }
+
+      // Run dedicated PR-review council (independent from cheatsheet council)
+      const prReview = await reviewPullRequest(ticket, tmpDir, config, {
+        checkpointDir,
+        ticketKey,
+        preWarnings: diffReview.warnings,
+      });
+
+      if (prReview.warnings.length > 0) {
+        validationResult.warnings = [...(validationResult.warnings || []), ...prReview.warnings];
+        validationResult.issues = [...(validationResult.issues || []), ...prReview.warnings];
+        warn(`PR review warnings: ${prReview.warnings.join(', ')}`);
+      }
+
+      if (prReview.status === 'rejected') {
+        const criticalIssues = prReview.critical?.length > 0
+          ? prReview.critical
+          : [prReview.reason || 'PR review rejected'];
+        validationResult.critical = [...(validationResult.critical || []), ...criticalIssues];
+        validationResult.issues = [...(validationResult.issues || []), ...criticalIssues];
+        validationResult.valid = false;
+        warn(`PR review rejected: ${criticalIssues.join(', ')}`);
+
+        if (attempt < maxRetries) {
+          endStep(false, 'PR review rejected, retrying execution...');
+          continue;
+        }
       }
 
       endStep(validationResult.valid, validationResult.valid ? 'Validation passed' : `Issues: ${validationResult.issues.join(', ')}`);

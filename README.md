@@ -149,6 +149,7 @@ Edit `config.json` in the project root. See `config.example.json` for the full s
 | `agent` | pollInterval (300s), maxTicketsPerCycle (1), logDir, executionRetries |
 | `aiProvider` | execute strategy + execute-mode provider settings |
 | `council` | council runtime config: `maxRounds`, `proposer`, `critics`, `evaluator` |
+| `prReviewCouncil` | optional independent council config used only for PR review (same shape as `council`) |
 | `infra` | enabled, scriptsDir, stopAfterProcessing |
 | `tests` | enabled |
 
