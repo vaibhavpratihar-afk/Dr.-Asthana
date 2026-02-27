@@ -81,6 +81,10 @@ src/
   prompt/
     index.js              → Orchestrates: ticket context → codebase context → council → cheatsheet
     council-prompts.js    → Prompt builders for council phases (proposer, critic, agreement)
+    pr-review.js          → PR review council orchestrator (thin wiring only)
+    review-context.js     → Builds PR review context (working-tree + base-branch diff)
+    review-prompts.js     → PR review roles, prompt builders, structural checks
+    review-parser.js      → PR review output parser (verdict/findings/summary)
     validator.js          → Post-execution validation (critical: empty diff, missing tests, <50% completion; warnings: broken imports, debug logs, TODO/FIXME). Also provides reviewDiff() for structural diff review.
     static.js             → Static system prompt for the executor agent
     ticket-context.js     → Builds ticket context markdown from parsed ticket data
@@ -107,6 +111,10 @@ The system separates **thinking** from **doing**: expensive models collaborate i
 
 ### 1. Council (expensive models)
 A group of AI agents collaborate via file-based discussions to produce an actionable output. A proposer explores the codebase and proposes a strategy — must follow the service's own instruction files (CLAUDE.md/codex.md/README.md) for test commands and validation steps, not invent ad-hoc ones. Adversarial critics must independently verify claims in the codebase and find at least 3 concrete issues (missing files, missing tests, broken references, incomplete removal, test infrastructure like mocks/fixtures/setupFiles, wrong approach). The proposer then synthesizes critiques via AGREED/DISAGREE protocol — AGREED means the existing plan already covers every critique WITHOUT changes; DISAGREE means at least one critique requires plan changes (triggers another round). Runs 1-3 rounds until convergence. All discussions are persisted to disk for full visibility. Human feedback can be injected mid-council via a `human-feedback.md` file. Agents maintain session memory across rounds to avoid re-reading the codebase.
+
+The council engine is used in two independent paths:
+- **Cheatsheet planning council** (feature-development plan generation)
+- **PR review council** (diff-based quality gate before shipping; optional separate `prReviewCouncil` config)
 
 ### 2. Evaluate (configurable quality gate)
 Structural pre-checks (fast, no API calls: minimum length, file paths, action verbs) followed by an AI evaluator that judges the council output and extracts a clean artifact between configurable markers.
@@ -154,7 +162,7 @@ Steps 3-7: For each service × branch (fully sequential, isolated clones):
   Step 3: CLONE_REPO — shallow clone, create feature branch, inject agent rules
   Step 4: BUILD_CHEATSHEET — council deliberation → quality gate → extract cheatsheet
   Step 5: EXECUTE — cheap model follows cheatsheet (static prompt + guardrails)
-  Step 6: VALIDATE_EXECUTION — critical issues (empty diff, missing tests, <50% completion) trigger retry; warnings (broken imports, debug logs, TODO/FIXME) flagged in PR. Includes structural diff review.
+  Step 6: VALIDATE_EXECUTION — structural validation + structural diff review + PR-review council. Critical issues from validation or PR review trigger retry; warnings are carried into PR notes.
   Step 7: SHIP — commit, push (force if needed), base tag if applicable, create PR (cheatsheet + validation warnings in description)
 Step 8:   NOTIFY — bundle artifact, transition (non-blocking), JIRA comment + Slack DM (always, even if transition fails), label updates
 ```
@@ -207,6 +215,7 @@ Key sections:
 - `agent` — pollInterval (300s), maxTicketsPerCycle (1), logDir, executionRetries
 - `aiProvider` — strategy + execute-mode provider settings
 - `council` — `maxRounds`, `proposer`, `critics`, `evaluator`
+- `prReviewCouncil` — optional independent council profile used only by PR review
 - `infra` — enabled, scriptsDir, stopAfterProcessing
 - `tests` — enabled
 
@@ -238,6 +247,15 @@ All run output is consolidated under `.pipeline-state/{ticketKey}/` — one dire
 │   │   ├── agreement.md
 │   │   └── evaluation.md
 │   └── human-feedback.md
+├── pr-review/
+│   └── council/                     ← PR review council workspace (independent of planning council)
+│       ├── status.md
+│       ├── round-1/
+│       │   ├── agent-0-proposal.md
+│       │   ├── agent-1-critique.md
+│       │   ├── agreement.md
+│       │   └── evaluation.md
+│       └── human-feedback.md
 ├── cheatsheet.md                    ← Persisted cheatsheet (survives retries)
 └── state.json                       ← Pipeline checkpoint for resume
 ```
