@@ -61,7 +61,12 @@ If no findings exist, use "None" under each findings section and verdict APPROVE
 }
 
 function parseFindingsSection(report, heading) {
-  const pattern = new RegExp(`${heading}\\s*:\\s*([\\s\\S]*?)(?:\\n[A-Z][A-Za-z ]+:|$)`, 'i');
+  const knownHeadings = ['Verdict', 'Critical Findings', 'Warning Findings', 'Summary'];
+  const terminators = knownHeadings
+    .filter((h) => h.toLowerCase() !== heading.toLowerCase())
+    .map((h) => h.replace(/\s+/g, '\\s+'))
+    .join('|');
+  const pattern = new RegExp(`${heading}\\s*:\\s*([\\s\\S]*?)(?:\\n(?:${terminators})\\s*:|$)`, 'i');
   const match = report.match(pattern);
   if (!match) return [];
 
@@ -125,12 +130,52 @@ function buildReviewContext(ticketData, cloneDir, preWarnings = []) {
   ].join('\n');
 }
 
-function buildPrReviewCouncilConfig(config) {
+function applyPrReviewCouncilOverride(config) {
   if (!config.prReviewCouncil) return config;
   return {
     ...config,
     council: config.prReviewCouncil,
   };
+}
+
+function reviewStructuralCheck(output) {
+  if (!output || output.trim().length < 50) {
+    return { passed: false, feedback: 'Review output too short' };
+  }
+  if (!/verdict\s*:/i.test(output)) {
+    return { passed: false, feedback: 'Missing Verdict section' };
+  }
+  if (!/(critical|warning)\s+findings\s*:/i.test(output)) {
+    return { passed: false, feedback: 'Missing findings section' };
+  }
+  return { passed: true, feedback: '' };
+}
+
+function getDiffBase(cloneDir, baseBranch) {
+  if (!baseBranch) return null;
+  const candidates = [`origin/${baseBranch}`, baseBranch];
+  for (const candidate of candidates) {
+    try {
+      execSync(`git rev-parse --verify "${candidate}"`, {
+        cwd: cloneDir, encoding: 'utf-8', stdio: 'pipe', timeout: 10000,
+      });
+      return candidate;
+    } catch {
+      // Try next candidate.
+    }
+  }
+  return null;
+}
+
+function runGitOrEmpty(cloneDir, cmd) {
+  try {
+    return execSync(cmd, {
+      cwd: cloneDir, encoding: 'utf-8', stdio: 'pipe', timeout: 30000,
+      maxBuffer: 10 * 1024 * 1024,
+    }).trim();
+  } catch {
+    return '';
+  }
 }
 
 /**
@@ -139,8 +184,20 @@ function buildPrReviewCouncilConfig(config) {
  * @returns {Promise<{status:'approved'|'rejected', critical:string[], warnings:string[], summary:string, reason?:string}>}
  */
 export async function reviewPullRequest(ticketData, cloneDir, config, options = {}) {
-  const { checkpointDir, ticketKey, preWarnings = [] } = options;
-  const reviewContext = buildReviewContext(ticketData, cloneDir, preWarnings);
+  const { checkpointDir, ticketKey, preWarnings = [], baseBranch } = options;
+  let reviewContext = buildReviewContext(ticketData, cloneDir, preWarnings);
+  const diffBase = getDiffBase(cloneDir, baseBranch);
+  if (diffBase) {
+    const baseDiffStat = runGitOrEmpty(cloneDir, `git diff --stat "${diffBase}"...HEAD`);
+    const baseChangedFiles = runGitOrEmpty(cloneDir, `git diff --name-only "${diffBase}"...HEAD`);
+    const baseDiff = runGitOrEmpty(cloneDir, `git diff "${diffBase}"...HEAD`);
+    if (baseDiff || baseDiffStat || baseChangedFiles) {
+      const limitedBaseDiff = baseDiff.length > 120000
+        ? `${baseDiff.slice(0, 120000)}\n\n[DIFF TRUNCATED]`
+        : baseDiff;
+      reviewContext = `${reviewContext}\n\n## Base Branch Diff (${diffBase}...HEAD)\n\n### Diff Stat\n${baseDiffStat || 'No diff stat'}\n\n### Changed Files\n${baseChangedFiles || 'No changed files'}\n\n### Git Diff\n${limitedBaseDiff || 'No diff'}`;
+    }
+  }
   const reviewCheckpointDir = checkpointDir ? path.join(checkpointDir, 'pr-review') : undefined;
 
   log('Starting PR review council...');
@@ -159,11 +216,14 @@ export async function reviewPullRequest(ticketData, cloneDir, config, options = 
       buildAgreement: buildAgreementPrompt,
     },
     evaluation: {
+      structural: reviewStructuralCheck,
       buildAiPrompt: buildReviewExtractorPrompt,
       outputMarkers: REVIEW_MARKERS,
+      approvalKeyword: 'APPROVED',
+      rejectionKeyword: 'REJECTED',
       forceOnLastRound: true,
     },
-    config: buildPrReviewCouncilConfig(config),
+    config: applyPrReviewCouncilOverride(config),
     label: ticketKey ? `${ticketKey}-pr-review` : 'pr-review',
     checkpointDir: reviewCheckpointDir,
   });

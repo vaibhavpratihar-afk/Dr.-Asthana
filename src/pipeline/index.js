@@ -314,10 +314,11 @@ async function processServiceBranch(config, ticket, serviceConfig, repoUrl, tick
     let executionResult;
     let validationResult;
     const maxRetries = config.agent.executionRetries || 2;
+    let retryFeedback = '';
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       startStep(5, `Execute cheatsheet (attempt ${attempt}/${maxRetries})`);
-      executionResult = await execute(cheatsheet, tmpDir, config);
+      executionResult = await execute(cheatsheet, tmpDir, config, { feedback: retryFeedback });
 
       if (!executionResult.output || executionResult.output.trim() === '') {
         warn(`Execution attempt ${attempt} produced no output`);
@@ -342,6 +343,7 @@ async function processServiceBranch(config, ticket, serviceConfig, repoUrl, tick
       // Retry only on critical issues (not warnings)
       if (validationResult.critical?.length > 0 && attempt < maxRetries) {
         warn(`Execution validation critical (attempt ${attempt}): ${validationResult.critical.join(', ')}`);
+        retryFeedback = `Execution validation failed with critical issues:\n${validationResult.critical.map((c) => `- CRITICAL: ${c}`).join('\n')}`;
         endStep(false, 'Critical issues, retrying...');
         continue;
       }
@@ -362,6 +364,7 @@ async function processServiceBranch(config, ticket, serviceConfig, repoUrl, tick
       const prReview = await reviewPullRequest(ticket, tmpDir, config, {
         checkpointDir,
         ticketKey,
+        baseBranch,
         preWarnings: diffReview.warnings,
       });
 
@@ -381,6 +384,12 @@ async function processServiceBranch(config, ticket, serviceConfig, repoUrl, tick
         warn(`PR review rejected: ${criticalIssues.join(', ')}`);
 
         if (attempt < maxRetries) {
+          const reviewFeedbackLines = [
+            'PR review rejected with the following issues:',
+            ...criticalIssues.map((issue) => `- CRITICAL: ${issue}`),
+            ...(prReview.warnings || []).map((issue) => `- WARNING: ${issue}`),
+          ];
+          retryFeedback = [retryFeedback, reviewFeedbackLines.join('\n')].filter(Boolean).join('\n\n');
           endStep(false, 'PR review rejected, retrying execution...');
           continue;
         }
