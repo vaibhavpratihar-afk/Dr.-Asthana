@@ -74,15 +74,24 @@ The review report MUST be between ${REVIEW_MARKERS.start} and ${REVIEW_MARKERS.e
 If no findings exist, use "None" under each findings section and verdict APPROVE.`;
 }
 
+/**
+ * Structural pre-check for PR review council output.
+ *
+ * This runs on councilOutput (agreement-stage text), NOT the final extracted
+ * report. Validate debate quality here — file references, actionable language,
+ * minimum length. Report-shape validation (Verdict/Findings sections) belongs
+ * in the evaluator output after extraction/contract parsing.
+ */
 export function reviewStructuralCheck(output) {
-  if (!output || output.trim().length < 50) {
-    return { passed: false, feedback: 'Review output too short' };
+  if (!output || output.trim().length < 100) {
+    return { passed: false, feedback: 'Review debate output too short (< 100 chars)' };
   }
-  if (!/verdict\s*:/i.test(output)) {
-    return { passed: false, feedback: 'Missing Verdict section' };
+
+  const filePathPattern = /[\w\-./]+\.(js|ts|jsx|tsx|json|yml|yaml|md|css|html|py|go|rs|sh)/g;
+  const filePaths = output.match(filePathPattern) || [];
+  if (filePaths.length < 1) {
+    return { passed: false, feedback: 'Review debate output does not reference any file paths' };
   }
-  if (!/(critical|warning)\s+findings\s*:/i.test(output)) {
-    return { passed: false, feedback: 'Missing findings section' };
-  }
+
   return { passed: true, feedback: '' };
 }
