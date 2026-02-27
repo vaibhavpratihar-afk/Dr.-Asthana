@@ -153,3 +153,4 @@ export async function buildCheatsheet(ticketData, cloneDir, config, options = {}
 }
 
 export { validateExecution, reviewDiff } from './validator.js';
+export { reviewPullRequest } from './pr-review.js';

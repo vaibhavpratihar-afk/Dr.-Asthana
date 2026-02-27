@@ -30,7 +30,7 @@ JIRA Ticket
 │  Follows cheatsheet exactly. No planning. No decisions.     │
 └─────────────────────────────────────────────────────────────┘
     ↓
-Validate (critical/warnings) → Diff Review → Commit → Push → PR on Azure DevOps
+Validate (critical/warnings) → Diff Review + PR Review Council → Commit → Push → PR on Azure DevOps
 ```
 
 The **cheatsheet** is the most valuable artifact. It's persisted to disk so failed executions can retry without re-running the council.
@@ -70,6 +70,10 @@ src/
   pipeline/               → Orchestrator, checkpoint persistence, step definitions
   prompt/                 → All prompt construction: council config, context builders, executor rules
     council-prompts.js    → Prompt builders for council phases (proposer, critic, agreement)
+    pr-review.js          → PR review council orchestrator (thin wiring only)
+    review-context.js     → Builds PR review context (working-tree + base-branch diff)
+    review-prompts.js     → PR review roles, prompt builders, structural checks
+    review-parser.js      → Parses PR review verdict/findings/summary
     ticket-context.js     → Ticket data → markdown context
     codebase-context.js   → Clone analysis → markdown context
     static.js             → Executor guardrails (no git, no docker, follow cheatsheet)
@@ -93,7 +97,7 @@ clean.sh                  → Cleanup utility: ./clean.sh (all) or ./clean.sh <K
    b. **Council phase** — a proposer explores the codebase (follows the service's own CLAUDE.md/codex.md for test commands); adversarial critics must find 3+ concrete issues (missing files/tests, broken refs, test infrastructure, incomplete removal). AGREED = plan already covers critiques without changes; DISAGREE = plan needs revision (triggers next round). Runs 1-3 rounds.
    c. **Evaluate** — quality gate runs structural pre-checks + AI evaluator, extracts a clean cheatsheet.
    d. **Execute** — cheap model follows the cheatsheet exactly (static prompt + guardrails).
-   e. **Validate** — critical issues (empty diff, missing tests, <50% completion) trigger retry. Warnings (broken imports, TODO/FIXME) flagged in PR. Structural diff review catches invalid JSON, dangling references.
+   e. **Validate + PR review** — structural validation + structural diff review + independent PR-review council. Critical issues from validation or PR review trigger retry; warnings are flagged in PR.
    f. Commits, pushes (force if needed), handles base image tagging, opens a PR on Azure DevOps (approach summary + file change list + diff stats + review notes, capped at 4000 chars).
 6. **Transitions ticket to LEAD REVIEW** (if PRs were created).
 7. Bundles run artifact to CDN. Posts plain-English JIRA comment and concise Slack DM (both always fire, even if transitions fail). Updates labels.
@@ -101,6 +105,10 @@ clean.sh                  → Cleanup utility: ./clean.sh (all) or ./clean.sh <K
 ## Council Module
 
 The council is a **reusable multi-agent deliberation engine** — decoupled from tickets or any specific use case. The caller provides everything: goal, context, agent roles, prompt builders, evaluation criteria, and output format.
+
+Used in two independent paths:
+- Cheatsheet planning council (feature implementation strategy)
+- PR review council (diff-based quality gate before shipping, optional `prReviewCouncil` config)
 
 **What it handles:** round orchestration, turn-taking, session continuity (agents don't re-read the codebase), file-based discussions (all outputs written to disk), human-in-the-loop (drop a file to steer), and graceful degradation (critic failures skip, proposer failure breaks, last-round force-evaluates).
 
@@ -149,6 +157,7 @@ Edit `config.json` in the project root. See `config.example.json` for the full s
 | `agent` | pollInterval (300s), maxTicketsPerCycle (1), logDir, executionRetries |
 | `aiProvider` | execute strategy + execute-mode provider settings |
 | `council` | council runtime config: `maxRounds`, `proposer`, `critics`, `evaluator` |
+| `prReviewCouncil` | optional independent council config used only for PR review (same shape as `council`) |
 | `infra` | enabled, scriptsDir, stopAfterProcessing |
 | `tests` | enabled |
 
@@ -162,6 +171,7 @@ Provider can be set per council role (`proposer`, `critics[*]`, `evaluator`) to 
 | `.pipeline-state/<ticketKey>/state.json` | Pipeline checkpoint for resume |
 | `.pipeline-state/<ticketKey>/cheatsheet.md` | Persisted cheatsheet (survives retries) |
 | `.pipeline-state/<ticketKey>/council/` | Council workspace: round artifacts, status, human feedback |
+| `.pipeline-state/<ticketKey>/pr-review/council/` | PR review council workspace (separate from planning council) |
 | `logs/YYYY-MM-DD/<runId>.log` | Full run log |
 
 ## Infrastructure (Optional)

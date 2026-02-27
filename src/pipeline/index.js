@@ -15,7 +15,7 @@ import { getServiceConfig, getRepoUrl } from '../utils/config.js';
 import { cloneAndBranch, commitAndPush, cleanup } from '../service/index.js';
 import { createPR } from '../service/azure.js';
 import { handleBaseTag } from '../service/base-tagger.js';
-import { buildCheatsheet, validateExecution, reviewDiff } from '../prompt/index.js';
+import { buildCheatsheet, validateExecution, reviewDiff, reviewPullRequest } from '../prompt/index.js';
 import { execute } from '../agent/index.js';
 import {
   postJiraStep,
@@ -253,6 +253,37 @@ export async function resume(config, ticketKey, fromStep) {
   throw new Error('Cannot resume: insufficient checkpoint data');
 }
 
+function mergeWarnings(validationResult, warnings = [], label) {
+  if (!warnings || warnings.length === 0) return;
+  validationResult.warnings = [...(validationResult.warnings || []), ...warnings];
+  validationResult.issues = [...(validationResult.issues || []), ...warnings];
+  warn(`${label}: ${warnings.join(', ')}`);
+}
+
+function applyPrReviewResult(validationResult, prReview) {
+  mergeWarnings(validationResult, prReview.warnings, 'PR review warnings');
+
+  if (prReview.status !== 'rejected') return [];
+
+  const criticalIssues = prReview.critical?.length > 0
+    ? prReview.critical
+    : [prReview.reason || 'PR review rejected'];
+  validationResult.critical = [...(validationResult.critical || []), ...criticalIssues];
+  validationResult.issues = [...(validationResult.issues || []), ...criticalIssues];
+  validationResult.valid = false;
+  warn(`PR review rejected: ${criticalIssues.join(', ')}`);
+  return criticalIssues;
+}
+
+function buildReviewRetryFeedback(prReview, criticalIssues) {
+  const reviewFeedbackLines = [
+    'PR review rejected with the following issues:',
+    ...criticalIssues.map((issue) => `- CRITICAL: ${issue}`),
+    ...(prReview.warnings || []).map((issue) => `- WARNING: ${issue}`),
+  ];
+  return reviewFeedbackLines.join('\n');
+}
+
 /**
  * Process a single (service, branch) combination through steps 3-7.
  */
@@ -314,10 +345,11 @@ async function processServiceBranch(config, ticket, serviceConfig, repoUrl, tick
     let executionResult;
     let validationResult;
     const maxRetries = config.agent.executionRetries || 2;
+    let retryFeedback = '';
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       startStep(5, `Execute cheatsheet (attempt ${attempt}/${maxRetries})`);
-      executionResult = await execute(cheatsheet, tmpDir, config);
+      executionResult = await execute(cheatsheet, tmpDir, config, { feedback: retryFeedback });
 
       if (!executionResult.output || executionResult.output.trim() === '') {
         warn(`Execution attempt ${attempt} produced no output`);
@@ -342,6 +374,7 @@ async function processServiceBranch(config, ticket, serviceConfig, repoUrl, tick
       // Retry only on critical issues (not warnings)
       if (validationResult.critical?.length > 0 && attempt < maxRetries) {
         warn(`Execution validation critical (attempt ${attempt}): ${validationResult.critical.join(', ')}`);
+        retryFeedback = `Execution validation failed with critical issues:\n${validationResult.critical.map((c) => `- CRITICAL: ${c}`).join('\n')}`;
         endStep(false, 'Critical issues, retrying...');
         continue;
       }
@@ -352,10 +385,27 @@ async function processServiceBranch(config, ticket, serviceConfig, repoUrl, tick
 
       // Run structural diff review
       const diffReview = await reviewDiff(tmpDir);
-      if (diffReview.warnings.length > 0) {
-        validationResult.warnings = [...(validationResult.warnings || []), ...diffReview.warnings];
-        validationResult.issues = [...(validationResult.issues || []), ...diffReview.warnings];
-        warn(`Diff review warnings: ${diffReview.warnings.join(', ')}`);
+      mergeWarnings(validationResult, diffReview.warnings, 'Diff review warnings');
+
+      let prReviewCriticalIssues = [];
+      if (validationResult.valid) {
+        // Run dedicated PR-review council (independent from cheatsheet council)
+        const prReview = await reviewPullRequest(ticket, tmpDir, config, {
+          checkpointDir,
+          ticketKey,
+          baseBranch,
+          preWarnings: diffReview.warnings,
+        });
+
+        prReviewCriticalIssues = applyPrReviewResult(validationResult, prReview);
+        if (prReviewCriticalIssues.length > 0 && attempt < maxRetries) {
+          const reviewRetryFeedback = buildReviewRetryFeedback(prReview, prReviewCriticalIssues);
+          retryFeedback = [retryFeedback, reviewRetryFeedback].filter(Boolean).join('\n\n');
+          endStep(false, 'PR review rejected, retrying execution...');
+          continue;
+        }
+      } else {
+        warn('Skipping PR review — validation already failed');
       }
 
       endStep(validationResult.valid, validationResult.valid ? 'Validation passed' : `Issues: ${validationResult.issues.join(', ')}`);

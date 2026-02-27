@@ -16,11 +16,17 @@ import { getStaticPrompt } from '../prompt/static.js';
  * @param {string} cheatsheet - The full cheatsheet text
  * @param {string} cloneDir - Path to cloned repo
  * @param {object} config - Full config object
+ * @param {object} [options]
+ * @param {string} [options.feedback] - Retry feedback from prior failed validation/review
  * @returns {Promise<{output: string, exitCode: number, completedNormally: boolean, numTurns: number|null, rateLimited: boolean, provider: string, duration: number}>}
  */
-export async function execute(cheatsheet, cloneDir, config) {
+export async function execute(cheatsheet, cloneDir, config, options = {}) {
+  const { feedback } = options;
   const staticPrompt = getStaticPrompt();
-  const fullPrompt = `${staticPrompt}\n\n---\n\n## Cheatsheet\n\n${cheatsheet}`;
+  const retryFeedback = feedback
+    ? `\n\n---\n\n## Retry Feedback\n\nPrevious attempt issues that must be fixed in this run:\n${feedback}`
+    : '';
+  const fullPrompt = `${staticPrompt}\n\n---\n\n## Cheatsheet\n\n${cheatsheet}${retryFeedback}`;
 
   return runAI({
     prompt: fullPrompt,
