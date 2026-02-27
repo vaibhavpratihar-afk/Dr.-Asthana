@@ -5,8 +5,10 @@
  * the council should evaluate now or continue to the next round.
  */
 
+import path from 'path';
 import { isGarbageOutput } from '../../ai-provider/provider.js';
 import { runAgent } from '../runtime/runner.js';
+import { buildAgreementContractPrompt, readAgreementContract } from '../contract/index.js';
 import { appendHumanFeedback } from '../utils/feedback.js';
 import { updateStatus, writeRoundFile } from '../runtime/workspace.js';
 import { log, warn } from '../../utils/logger.js';
@@ -33,10 +35,24 @@ export async function runAgreementStage({ round, workspace, label, maxRounds, pr
   }
 
   updateStatus(workspace, label, maxRounds, round, 'agreement');
-  const prompt = appendHumanFeedback(prompts.buildAgreement(baseContext, proposerOutput, criticOutputs, roles.agreement), workspace);
+  let prompt = appendHumanFeedback(prompts.buildAgreement(baseContext, proposerOutput, criticOutputs, roles.agreement), workspace);
+
+  // Compute contract path and append instructions if workspace is available
+  const contractPath = workspace ? path.join(workspace, `round-${round}`, 'agreement-contract.json') : null;
+  if (contractPath) {
+    prompt += buildAgreementContractPrompt(contractPath);
+  }
+
+  // Override allowedTools for agent-0 to add Write (agreement needs to write the contract file)
+  const agreementOpts = { ...agentOpts };
+  if (contractPath) {
+    agreementOpts.agents = agentOpts.agents.map((a, i) =>
+      i === 0 ? { ...a, allowedTools: addWriteTool(a.allowedTools) } : a,
+    );
+  }
 
   log(`[Round ${round}] Running agreement check...${sessions.has(0) ? ' (resuming proposer session)' : ''}`);
-  const result = await runAgent({ prompt, label: `council-r${round}-agreement`, agentIndex: 0, ...agentOpts });
+  const result = await runAgent({ prompt, label: `council-r${round}-agreement`, agentIndex: 0, ...agreementOpts });
   if (result.failed) {
     warn(`Agreement check failed in round ${round}`);
     return { halt: true };
@@ -48,7 +64,21 @@ export async function runAgreementStage({ round, workspace, label, maxRounds, pr
 
   if (isGarbageOutput(result.output)) warn(`Agreement check round ${round} produced garbage output`);
 
-  const agreed = /^\s*AGREED/i.test(result.output);
+  // Try contract file first, fall back to regex
+  let agreed;
+  if (contractPath) {
+    const contract = readAgreementContract(contractPath);
+    if (contract.valid) {
+      agreed = contract.decision === 'AGREED';
+      log(`[Round ${round}] Agreement via contract: ${contract.decision}`);
+    } else {
+      warn(`[Round ${round}] Contract file not found or invalid (${contract.reason}), falling back to regex`);
+      agreed = /^\s*AGREED/i.test(result.output);
+    }
+  } else {
+    agreed = /^\s*AGREED/i.test(result.output);
+  }
+
   writeRoundFile(workspace, round, 'agreement.md', `${agreed ? 'AGREED' : 'DISAGREE'}\n\n${result.output}`);
   if (agreed) {
     return {
@@ -69,4 +99,10 @@ export async function runAgreementStage({ round, workspace, label, maxRounds, pr
     lastCouncilOutput,
     nextProposerOutput: result.output,
   };
+}
+
+/** Append Write to a comma-separated allowedTools string if not already present. */
+function addWriteTool(allowedTools) {
+  if (!allowedTools) return 'Read,Write,Glob,Grep';
+  return allowedTools.includes('Write') ? allowedTools : `${allowedTools},Write`;
 }

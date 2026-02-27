@@ -13,8 +13,11 @@
  * All AI spawning goes through the AI Provider module via runAI().
  */
 
+import fs from 'fs';
+import path from 'path';
 import { runAI } from '../../ai-provider/index.js';
 import { isGarbageOutput } from '../../ai-provider/provider.js';
+import { buildEvaluationContractPrompt, readEvaluationContract } from '../contract/index.js';
 import { defaultStructuralCheck, DEFAULT_APPROVAL_KEYWORD, DEFAULT_REJECTION_KEYWORD, DEFAULT_FEEDBACK_MARKER } from '../config/defaults.js';
 import { log, warn } from '../../utils/logger.js';
 
@@ -46,6 +49,8 @@ export async function evaluate(councilOutput, evalOpts, force = false) {
     context,
     config,
     label = 'eval',
+    workspace = null,
+    round = null,
   } = evalOpts;
 
   // Structural pre-check (fast, no API calls)
@@ -58,7 +63,13 @@ export async function evaluate(councilOutput, evalOpts, force = false) {
   const evalConfig = config.council?.evaluator || null;
   const evaluators = resolveEvaluators(evalConfig);
 
-  const prompt = buildAiPrompt(councilOutput, context, force);
+  // Contract path for structured evaluation output
+  const contractPath = (workspace && round) ? path.join(workspace, `round-${round}`, 'evaluation-contract.json') : null;
+
+  let prompt = buildAiPrompt(councilOutput, context, force);
+  if (contractPath) {
+    prompt += buildEvaluationContractPrompt(contractPath, { approvalKeyword, rejectionKeyword });
+  }
 
   // N-evaluator loop with first-success strategy
   for (let i = 0; i < evaluators.length; i++) {
@@ -66,6 +77,14 @@ export async function evaluate(councilOutput, evalOpts, force = false) {
     const evLabel = `evaluator-${i}${force ? '-force' : ''}`;
 
     log(`[${evLabel}] Trying evaluator ${i + 1}/${evaluators.length}: provider=${evConfig.provider}, model=${evConfig.model || 'default'}`);
+
+    // Clean up stale contract file from previous evaluator attempt
+    if (contractPath) try { fs.unlinkSync(contractPath); } catch { /* ignore */ }
+
+    // Override allowedTools to add Write if contract path is available
+    const providerConfig = contractPath
+      ? { ...evConfig, allowedTools: addWriteTool(evConfig.allowedTools) }
+      : evConfig;
 
     try {
       const result = await runAI({
@@ -76,7 +95,7 @@ export async function evaluate(councilOutput, evalOpts, force = false) {
         logDir: config.agent.logDir,
         ticketKey: label,
         config,
-        providerConfig: evConfig,
+        providerConfig,
       });
 
       const rawOutput = result.output || '';
@@ -86,6 +105,29 @@ export async function evaluate(councilOutput, evalOpts, force = false) {
         continue;
       }
 
+      // Try contract file first
+      if (contractPath) {
+        const contract = readEvaluationContract(contractPath, { approvalKeyword, rejectionKeyword });
+        if (contract.valid) {
+          log(`[${evLabel}] Evaluation via contract: ${contract.verdict}`);
+          if (contract.verdict === approvalKeyword.toUpperCase()) {
+            const extracted = extractByMarkers(rawOutput, outputMarkers);
+            if (extracted && extracted.length > 100) {
+              return { passed: true, feedback: '', output: extracted };
+            }
+            return { passed: true, feedback: '', output: councilOutput };
+          }
+          if (!force) {
+            const feedback = contract.feedback || contract.issues?.join('; ') || 'Evaluator rejected without specific feedback';
+            return { passed: false, feedback, output: null };
+          }
+          // Force mode with rejection contract — extract best-effort below
+        } else {
+          warn(`[${evLabel}] Contract file not found or invalid (${contract.reason}), falling back to keyword matching`);
+        }
+      }
+
+      // Fallback: keyword matching in raw output (original logic)
       if (rawOutput.includes(approvalKeyword)) {
         const extracted = extractByMarkers(rawOutput, outputMarkers);
         if (extracted && extracted.length > 100) {
@@ -129,6 +171,12 @@ function resolveEvaluators(evalConfig) {
   if (Array.isArray(evalConfig) && evalConfig.length > 0) return evalConfig;
   if (evalConfig && typeof evalConfig === 'object') return [evalConfig];
   return [{ provider: 'claude', model: 'sonnet', maxTurns: 5, timeoutMinutes: 5, allowedTools: 'Read,Glob,Grep' }];
+}
+
+/** Append Write to a comma-separated allowedTools string if not already present. */
+function addWriteTool(allowedTools) {
+  if (!allowedTools) return 'Read,Write,Glob,Grep';
+  return allowedTools.includes('Write') ? allowedTools : `${allowedTools},Write`;
 }
 
 /**

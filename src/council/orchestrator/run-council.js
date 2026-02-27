@@ -33,7 +33,7 @@ export async function runCouncil({ goal, context, workingDir, roles, prompts, ev
   const workspace = initWorkspace(checkpointDir, label, maxRounds);
   const sessions = new Map();
   const agentOpts = { agents, sessions, config, councilLabel: label, workingDir };
-  const evalOpts = { ...evaluation, context, config, label };
+  const evalOpts = { ...evaluation, context, config, label, workspace };
 
   let proposerOutput = '';
   let criticOutputs = [];
