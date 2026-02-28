@@ -5,6 +5,7 @@
  * the council should evaluate now or continue to the next round.
  */
 
+import fs from 'fs';
 import path from 'path';
 import { isGarbageOutput } from '../../ai-provider/provider.js';
 import { runAgent } from '../runtime/runner.js';
@@ -50,6 +51,9 @@ export async function runAgreementStage({ round, workspace, label, maxRounds, pr
       i === 0 ? { ...a, allowedTools: addWriteTool(a.allowedTools) } : a,
     );
   }
+
+  // Clean up stale contract file from previous run to avoid reading outdated decisions
+  if (contractPath) try { fs.unlinkSync(contractPath); } catch { /* ignore */ }
 
   log(`[Round ${round}] Running agreement check...${sessions.has(0) ? ' (resuming proposer session)' : ''}`);
   const result = await runAgent({ prompt, label: `council-r${round}-agreement`, agentIndex: 0, ...agreementOpts });

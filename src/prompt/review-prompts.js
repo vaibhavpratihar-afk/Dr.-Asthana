@@ -87,9 +87,11 @@ export function reviewStructuralCheck(output) {
     return { passed: false, feedback: 'Review debate output too short (< 100 chars)' };
   }
 
-  const filePathPattern = /[\w\-./]+\.(js|ts|jsx|tsx|json|yml|yaml|md|css|html|py|go|rs|sh)/g;
-  const filePaths = output.match(filePathPattern) || [];
-  if (filePaths.length < 1) {
+  // Generic file-reference detection: paths with / separators OR dotted extensions.
+  // Avoids a hardcoded extension whitelist that misses Dockerfile, Makefile, lockfiles, etc.
+  const slashPaths = output.match(/[\w\-.]+(?:\/[\w\-.]+)+/g) || [];
+  const dottedPaths = output.match(/[\w\-./]+\.\w{1,10}/g) || [];
+  if (slashPaths.length + dottedPaths.length < 1) {
     return { passed: false, feedback: 'Review debate output does not reference any file paths' };
   }
 
