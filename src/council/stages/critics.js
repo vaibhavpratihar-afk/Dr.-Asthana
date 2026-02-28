@@ -1,28 +1,34 @@
 /**
- * Critics stage.
+ * Critics Stage - sequential critic pass over shared file-backed artifacts.
  *
- * Runs critic agents (agent-1..N), skips failed/garbage outputs, and persists
- * successful critiques for the current round.
+ * Responsibility:
+ * - Run critics in order.
+ * - Persist each critic markdown file for agreement/evaluator consumption.
  */
 
 import { isGarbageOutput } from '../../ai-provider/provider.js';
 import { runAgent } from '../runtime/runner.js';
 import { appendHumanFeedback } from '../utils/feedback.js';
-import { updateStatus, writeRoundFile } from '../runtime/workspace.js';
+import { updateStatus } from '../runtime/workspace.js';
+import { appendText, writeText } from '../runtime/files.js';
 import { log, warn } from '../../utils/logger.js';
 
-/**
- * Execute critics stage.
- *
- * @returns {Promise<{outputs: Array<{index: number, output: string}>}>}
- */
-export async function runCriticsStage({ round, workspace, label, maxRounds, prompts, baseContext, proposerOutput, roles, agentOpts, sessions, agents }) {
-  const outputs = [];
+const stageSuccess = (reason, data = {}) => ({ ok: true, reason, data });
+const roundMeta = (round, maxRounds, artifacts) => ({ round, maxRounds, roundsLeft: Math.max(maxRounds - round, 0), artifacts });
+
+const appendDecisionLog = (shared, round, body) => appendText(shared.decisions, `\n## Round ${round} - critics\n\n${body}\n`);
+
+export async function runCriticsStage({ round, workspace, label, maxRounds, prompts, baseContext, roles, agentOpts, sessions, agents, artifacts }) {
   let skipped = 0;
+  const written = [];
 
   for (let ci = 1; ci < agents.length; ci++) {
     updateStatus(workspace, label, maxRounds, round, `agent-${ci}`);
-    const prompt = appendHumanFeedback(prompts.buildCritic(round, baseContext, proposerOutput, outputs, ci, roles.critic), workspace);
+    const criticFile = artifacts.round.critics[ci - 1];
+    const prompt = appendHumanFeedback(
+      prompts.buildCritic(round, baseContext, '', [], ci, roles.critic, roundMeta(round, maxRounds, { ...artifacts, round: { ...artifacts.round, criticCurrent: criticFile } })),
+      workspace,
+    );
 
     log(`[Round ${round}] Running Critic ${ci} (agent-${ci})...${sessions.has(ci) ? ' (resuming session)' : ''}`);
     const result = await runAgent({ prompt, label: `council-r${round}-agent-${ci}`, agentIndex: ci, ...agentOpts });
@@ -32,10 +38,10 @@ export async function runCriticsStage({ round, workspace, label, maxRounds, prom
       continue;
     }
 
-    outputs.push({ index: ci, output: result.output });
-    writeRoundFile(workspace, round, `agent-${ci}-critique.md`, result.output);
+    writeText(criticFile, result.output);
+    written.push(criticFile);
   }
 
-  if (skipped > 0) log(`[Round ${round}] ${skipped} critic(s) skipped, ${outputs.length} succeeded`);
-  return { outputs };
+  appendDecisionLog(artifacts.shared, round, `Critic artifacts written: ${written.length}. Skipped: ${skipped}.`);
+  return stageSuccess('critiques_collected', { criticFiles: written, skipped });
 }

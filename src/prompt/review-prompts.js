@@ -5,28 +5,17 @@
  */
 
 import { buildProposerPrompt, buildCriticPrompt, buildAgreementPrompt } from './council-prompts.js';
+import { getPersona, renderPersonaTemplate } from '../personas/index.js';
 
 export const REVIEW_MARKERS = {
   start: '=== PR REVIEW START ===',
   end: '=== PR REVIEW END ===',
 };
 
-const REVIEW_PROPOSER_ROLE =
-  'You are a strict PR reviewer. Review only the provided git diff and changed files. ' +
-  'Identify correctness risks, regressions, missing tests, incomplete updates, and unsafe behavior. ' +
-  'Do not suggest broad refactors unrelated to the diff. ' +
-  'Output findings with severity as CRITICAL or WARNING, each with file path and exact reason.';
-
-const REVIEW_CRITIC_ROLE =
-  'You are an adversarial PR reviewer. Challenge the proposer and find misses. ' +
-  'You must verify claims directly against the diff/context and add missing findings. ' +
-  'Prioritize concrete, merge-blocking defects over style nits. ' +
-  'Each finding must include severity (CRITICAL/WARNING), file path, and rationale.';
-
 export function getReviewRoles() {
   return {
-    proposer: REVIEW_PROPOSER_ROLE,
-    critic: REVIEW_CRITIC_ROLE,
+    proposer: getPersona('reviewProposer'),
+    critic: getPersona('reviewCritic'),
   };
 }
 
@@ -48,30 +37,13 @@ export function buildReviewExtractorPrompt(councilOutput, context, force) {
     ? 'Produce best-effort review output even if debate quality is imperfect.'
     : 'Reject if findings are vague or missing file-specific evidence.';
 
-  return `You are evaluating a PR review debate output.
-
-## Context
-${context}
-
-## Debate Output
-${councilOutput}
-
-## Task
-${modeInstruction}
-
-Return exactly one of:
-1. "APPROVED" + a review report between markers, or
-2. "REJECTED" + feedback after === FEEDBACK ===.
-
-The review report MUST be between ${REVIEW_MARKERS.start} and ${REVIEW_MARKERS.end} and follow:
-- Verdict: APPROVE or REJECT
-- Critical Findings:
-  - <file>: <issue>
-- Warning Findings:
-  - <file>: <issue>
-- Summary: <short sentence>
-
-If no findings exist, use "None" under each findings section and verdict APPROVE.`;
+  return renderPersonaTemplate('reviewEvaluatorTemplate', {
+    CONTEXT: context,
+    COUNCIL_OUTPUT: councilOutput,
+    MODE_INSTRUCTION: modeInstruction,
+    START_MARKER: REVIEW_MARKERS.start,
+    END_MARKER: REVIEW_MARKERS.end,
+  });
 }
 
 /**

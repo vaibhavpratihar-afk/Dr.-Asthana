@@ -1,27 +1,39 @@
 /**
- * Council workspace — file-based observability and human-in-the-loop.
+ * Council Workspace - file-backed observability and human feedback bridge.
  *
- * All agent discussions happen via files so anyone can review them live.
- * Creates a structured directory under .pipeline-state/{label}/council/
- * that humans can watch during a run, and optionally steer via feedback files.
+ * Responsibility:
+ * - Persist stage artifacts per round for auditability.
+ * - Maintain status.md as live run heartbeat.
+ * - Support one-shot human steering through human-feedback.md.
  *
- * Layout:
- *   council/
- *   ├── status.md                    ← Live status: current round, phase
- *   ├── round-1/
- *   │   ├── agent-0-proposal.md      ← Proposer's output
- *   │   ├── agent-1-critique.md      ← First critic's output
- *   │   ├── agent-2-critique.md      ← Second critic's output (if N > 2)
- *   │   ├── agreement.md
- *   │   └── evaluation.md
- *   ├── round-2/
- *   │   └── ...
- *   └── human-feedback.md            ← Drop this file in to inject guidance
+ * Contract:
+ * - Workspace IO is best-effort and must never crash pipeline execution.
+ * - Public helpers are side-effect utilities; they return null/no-op on IO failure.
  */
 
 import fs from 'fs';
 import path from 'path';
 import { log, warn, debug } from '../../utils/logger.js';
+
+const STATUS_FILENAME = 'status.md';
+const HUMAN_FEEDBACK_FILENAME = 'human-feedback.md';
+
+const tryWorkspaceOp = (fn, onError) => {
+  try {
+    return fn();
+  } catch {
+    // Workspace writes are observability helpers; never crash the pipeline on IO issues.
+    if (onError) onError();
+    return null;
+  }
+};
+
+const writeWorkspaceFile = (workspace, relativePath, content) => {
+  const filePath = path.join(workspace, relativePath);
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, content);
+  return filePath;
+};
 
 /**
  * Initialize the council workspace directory with an initial status file.
@@ -29,25 +41,14 @@ import { log, warn, debug } from '../../utils/logger.js';
  */
 export function initWorkspace(checkpointDir, label, maxRounds) {
   if (!checkpointDir) return null;
-  try {
+  return tryWorkspaceOp(() => {
     const workspace = path.join(checkpointDir, 'council');
     fs.mkdirSync(workspace, { recursive: true });
-    const status = [
-      `# Council Status`,
-      ``,
-      `**Label:** ${label}`,
-      `**Max Rounds:** ${maxRounds}`,
-      `**Started:** ${new Date().toISOString()}`,
-      `**Phase:** starting`,
-      `**Round:** 0/${maxRounds}`,
-    ].join('\n');
-    fs.writeFileSync(path.join(workspace, 'status.md'), status);
+    const status = buildStatusMarkdown({ label, maxRounds, round: 0, phase: 'starting', includeStarted: true });
+    writeWorkspaceFile(workspace, STATUS_FILENAME, status);
     debug(`Initialized council workspace at ${workspace}`);
     return workspace;
-  } catch {
-    warn('Failed to initialize council workspace');
-    return null;
-  }
+  }, () => warn('Failed to initialize council workspace'));
 }
 
 /**
@@ -56,13 +57,10 @@ export function initWorkspace(checkpointDir, label, maxRounds) {
  */
 export function writeRoundFile(workspace, round, filename, content) {
   if (!workspace) return;
-  try {
-    const roundDir = path.join(workspace, `round-${round}`);
-    fs.mkdirSync(roundDir, { recursive: true });
-    const filePath = path.join(roundDir, filename);
-    fs.writeFileSync(filePath, content);
+  tryWorkspaceOp(() => {
+    const filePath = writeWorkspaceFile(workspace, `round-${round}/${filename}`, content);
     debug(`Wrote council file ${filePath}`);
-  } catch { /* non-critical */ }
+  });
 }
 
 /**
@@ -70,24 +68,10 @@ export function writeRoundFile(workspace, round, filename, content) {
  */
 export function updateStatus(workspace, label, maxRounds, round, phase, extra = {}) {
   if (!workspace) return;
-  try {
-    const lines = [
-      `# Council Status`,
-      ``,
-      `**Label:** ${label}`,
-      `**Max Rounds:** ${maxRounds}`,
-      `**Updated:** ${new Date().toISOString()}`,
-      `**Phase:** ${phase}`,
-      `**Round:** ${round}/${maxRounds}`,
-    ];
-    if (extra.agreed !== undefined) {
-      lines.push(`**Agreed:** ${extra.agreed ? 'Yes' : 'No'}`);
-    }
-    if (extra.result) {
-      lines.push(`**Result:** ${extra.result}`);
-    }
-    fs.writeFileSync(path.join(workspace, 'status.md'), lines.join('\n'));
-  } catch { /* non-critical */ }
+  tryWorkspaceOp(() => {
+    const status = buildStatusMarkdown({ label, maxRounds, round, phase, extra, includeStarted: false });
+    writeWorkspaceFile(workspace, STATUS_FILENAME, status);
+  });
 }
 
 /**
@@ -97,17 +81,34 @@ export function updateStatus(workspace, label, maxRounds, round, phase, extra = 
  */
 export function checkHumanFeedback(workspace) {
   if (!workspace) return null;
-  try {
-    const feedbackPath = path.join(workspace, 'human-feedback.md');
+  return tryWorkspaceOp(() => {
+    const feedbackPath = path.join(workspace, HUMAN_FEEDBACK_FILENAME);
     if (!fs.existsSync(feedbackPath)) return null;
     const content = fs.readFileSync(feedbackPath, 'utf-8').trim();
+    // Feedback is single-use by design to avoid replaying stale instructions.
     fs.unlinkSync(feedbackPath);
     if (content) {
       log('Human feedback detected and consumed from council workspace');
       return content;
     }
     return null;
-  } catch {
-    return null;
-  }
+  });
 }
+
+const buildStatusMarkdown = ({ label, maxRounds, round, phase, extra = {}, includeStarted }) => {
+  const lines = [
+    '# Council Status',
+    '',
+    `**Label:** ${label}`,
+    `**Max Rounds:** ${maxRounds}`,
+  ];
+
+  lines.push(`**${includeStarted ? 'Started' : 'Updated'}:** ${new Date().toISOString()}`);
+  lines.push(`**Phase:** ${phase}`);
+  lines.push(`**Round:** ${round}/${maxRounds}`);
+
+  if (extra.agreed !== undefined) lines.push(`**Agreed:** ${extra.agreed ? 'Yes' : 'No'}`);
+  if (extra.result) lines.push(`**Result:** ${extra.result}`);
+
+  return lines.join('\n');
+};

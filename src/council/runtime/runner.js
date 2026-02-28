@@ -1,13 +1,24 @@
 /**
- * Council agent runner — wraps runAI() with session tracking (memory).
+ * Agent Runner - resilient runAI wrapper with per-agent session memory.
  *
- * Each agent maintains a session ID across rounds so subsequent calls
- * resume the same conversation. This avoids rework — agents don't
- * re-read the codebase or re-derive conclusions from previous rounds.
+ * Responsibility:
+ * - Execute one agent call with provider config and logging metadata.
+ * - Persist session IDs so later rounds resume the same conversation.
+ *
+ * Contract:
+ * - Never throws; always returns { output, rateLimited, failed }.
+ * - Failure modes are normalized for deterministic stage handling.
  */
 
 import { runAI } from '../../ai-provider/index.js';
 import { warn } from '../../utils/logger.js';
+
+const toAgentResult = (result) => ({
+  output: result.output || '',
+  rateLimited: Boolean(result.rateLimited),
+  failed: false,
+});
+const toFailedAgentResult = () => ({ output: '', rateLimited: false, failed: true });
 
 /**
  * Run a single council agent (proposer, critic, or agreement phase)
@@ -43,9 +54,9 @@ export async function runAgent({ prompt, workingDir, label, agentIndex, agents, 
       sessions.set(agentIndex, result.sessionId);
     }
 
-    return { output: result.output || '', rateLimited: !!result.rateLimited, failed: false };
+    return toAgentResult(result);
   } catch (err) {
     warn(`[${label}] Failed: ${err.message}`);
-    return { output: '', rateLimited: false, failed: true };
+    return toFailedAgentResult();
   }
 }

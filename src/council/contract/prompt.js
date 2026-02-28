@@ -1,10 +1,16 @@
 /**
- * Contract prompt builders — generate instructions telling agents
- * to write structured JSON contract files via the Write tool.
+ * Contract Prompt Builders - deterministic write-contract instructions.
  *
- * These instructions are appended to agent prompts so the system
- * can read deterministic decisions from disk instead of parsing prose.
+ * Responsibility:
+ * - Produce prompt fragments that force agents to write JSON contracts.
+ *
+ * Contract:
+ * - Output strings are append-only prompt sections.
+ * - Decision/verdict enums are explicit so parser behavior is deterministic.
  */
+
+const joinLines = (lines) => lines.join('\n');
+const fencedJson = (json) => ['```json', json, '```'];
 
 /**
  * Build instructions for the agreement contract.
@@ -13,7 +19,7 @@
  * @returns {string} Instruction block to append to the agreement prompt
  */
 export function buildAgreementContractPrompt(contractPath) {
-  return [
+  return joinLines([
     '',
     '## Required: Write Decision Contract',
     '',
@@ -23,17 +29,13 @@ export function buildAgreementContractPrompt(contractPath) {
     `**File path:** \`${contractPath}\``,
     '',
     'If you AGREE (your existing plan already covers all valid critiques without changes):',
-    '```json',
-    '{"decision": "AGREED"}',
-    '```',
+    ...fencedJson('{"decision": "AGREED"}'),
     '',
     'If you DISAGREE (at least one critique requires plan changes):',
-    '```json',
-    '{"decision": "DISAGREE", "reasoning": "brief explanation of what changed"}',
-    '```',
+    ...fencedJson('{"decision": "DISAGREE", "reasoning": "brief explanation of what changed"}'),
     '',
     'Write this file BEFORE your final response. The decision field must be exactly "AGREED" or "DISAGREE".',
-  ].join('\n');
+  ]);
 }
 
 /**
@@ -47,7 +49,7 @@ export function buildEvaluationContractPrompt(contractPath, opts = {}) {
   const approvalKeyword = opts.approvalKeyword || 'APPROVED';
   const rejectionKeyword = opts.rejectionKeyword || 'REJECTED';
 
-  return [
+  return joinLines([
     '',
     '## Required: Write Verdict Contract',
     '',
@@ -56,16 +58,12 @@ export function buildEvaluationContractPrompt(contractPath, opts = {}) {
     '',
     `**File path:** \`${contractPath}\``,
     '',
-    `If you approve:`,
-    '```json',
-    `{"verdict": "${approvalKeyword}"}`,
-    '```',
+    'If you approve:',
+    ...fencedJson(`{"verdict": "${approvalKeyword}"}`),
     '',
-    `If you reject:`,
-    '```json',
-    `{"verdict": "${rejectionKeyword}", "feedback": "what needs fixing", "issues": ["issue 1", "issue 2"]}`,
-    '```',
+    'If you reject:',
+    ...fencedJson(`{"verdict": "${rejectionKeyword}", "feedback": "what needs fixing", "issues": ["issue 1", "issue 2"]}`),
     '',
     `Write this file BEFORE your final response. The verdict field must be exactly "${approvalKeyword}" or "${rejectionKeyword}".`,
-  ].join('\n');
+  ]);
 }

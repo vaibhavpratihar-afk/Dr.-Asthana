@@ -1,8 +1,11 @@
 /**
- * Contract module — public API.
+ * Contract API - re-export surface for contract prompt/read utilities.
  *
- * Structured JSON contracts written by agents via the Write tool,
- * replacing fragile string-matching of free-form AI output.
+ * Responsibility:
+ * - Expose a minimal public entrypoint for contract features.
+ *
+ * Contract:
+ * - Keep import paths stable for callers outside contract internals.
  */
 
 export { buildAgreementContractPrompt, buildEvaluationContractPrompt } from './prompt.js';

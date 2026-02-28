@@ -1,29 +1,43 @@
 /**
- * Evaluation stage.
+ * Evaluation Stage - final round gate recorded as markdown + deterministic JSON.
  *
- * Evaluates the round output and persists evaluation artifacts/status.
+ * Responsibility:
+ * - Evaluate agreement artifact.
+ * - Persist evaluation feedback for next rounds.
  */
 
 import { evaluate } from '../evaluator/evaluator.js';
-import { updateStatus, writeRoundFile } from '../runtime/workspace.js';
+import { updateStatus } from '../runtime/workspace.js';
+import { appendText, readJson, readText, writeJson, writeText } from '../runtime/files.js';
 import { log } from '../../utils/logger.js';
 
-/**
- * Execute evaluation stage.
- *
- * @returns {Promise<{passed: boolean, feedback: string, output: string|null}>}
- */
-export async function runEvaluationStage({ round, maxRounds, workspace, label, criticOutputs, lastCouncilOutput, evalOpts, isLastRound }) {
-  const forceEval = isLastRound && (evalOpts.forceOnLastRound !== false);
-  updateStatus(workspace, label, maxRounds, round, 'evaluating', { agreed: criticOutputs.length === 0 ? undefined : /AGREED/i.test(lastCouncilOutput) });
+const stageSuccess = (reason, data = {}) => ({ ok: true, reason, data });
+const appendDecisionLog = (shared, round, body) => appendText(shared.decisions, `\n## Round ${round} - evaluation\n\n${body}\n`);
 
-  log(`[Round ${round}] Evaluating council output${forceEval && !/Agreed/.test(lastCouncilOutput) ? ' (forced, last round)' : ''}...`);
-  const result = await evaluate(lastCouncilOutput, { ...evalOpts, round }, forceEval);
-  writeRoundFile(workspace, round, 'evaluation.md', `# Evaluation\n\n**Passed:** ${result.passed}\n\n${result.feedback || result.output || ''}`);
-  if (result.passed) {
-    log(`Council approved after round ${round}`);
-    updateStatus(workspace, label, maxRounds, round, 'done', { agreed: true, result: 'passed' });
+export async function runEvaluationStage({ round, maxRounds, workspace, label, evalOpts, isLastRound, artifacts }) {
+  const forceEval = isLastRound && (evalOpts.forceOnLastRound !== false);
+  updateStatus(workspace, label, maxRounds, round, 'evaluating');
+
+  const debateOutput = readText(artifacts.round.agreement, '');
+  log(`[Round ${round}] Evaluating council output${forceEval ? ' (forced, last round)' : ''}...`);
+  const evaluation = await evaluate(debateOutput, { ...evalOpts, round }, forceEval);
+  const control = readJson(artifacts.round.control, {});
+
+  writeText(artifacts.round.evaluation, `# Evaluation\n\n**Passed:** ${evaluation.passed}\n\n${evaluation.feedback || evaluation.output || ''}`);
+  writeJson(artifacts.round.control, {
+    ...control,
+    round,
+    evaluationVerdict: evaluation.passed ? 'APPROVED' : 'REJECTED',
+    nextAction: evaluation.passed ? 'done' : 'next_round',
+  });
+
+  if (!evaluation.passed) {
+    writeText(artifacts.shared.evaluatorFeedback, `# Evaluator Feedback (Round ${round})\n\n${evaluation.feedback || 'No feedback'}\n`);
+    appendDecisionLog(artifacts.shared, round, `Verdict: REJECTED. Feedback recorded to \`${artifacts.shared.evaluatorFeedback}\`.`);
+    return stageSuccess('evaluation_rejected', { evaluation });
   }
 
-  return result;
+  appendDecisionLog(artifacts.shared, round, 'Verdict: APPROVED.');
+  updateStatus(workspace, label, maxRounds, round, 'done', { result: 'passed' });
+  return stageSuccess('evaluation_passed', { evaluation });
 }

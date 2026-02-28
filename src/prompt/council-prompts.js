@@ -1,58 +1,145 @@
 /**
- * Council prompt builders — constructs prompts for each phase of council deliberation.
+ * Council Prompt Builders - file-protocol prompts for proposer/critic/agreement.
  *
- * Lives in the prompt module because all prompt construction is owned here.
- * The council engine receives these as config and calls them with round state.
+ * Responsibility:
+ * - Build stage prompts that reference shared artifact paths.
+ * - Avoid semantic summarization in JS; transfer happens through files.
+ *
+ * Contract:
+ * - All prompts include Required Reads and Required Writes sections.
+ * - JSON files are reserved for deterministic control contracts.
  */
 
 import { DEFAULT_AGREEMENT_ROLE } from '../council/config/defaults.js';
+import { getPersona, renderPersonaTemplate } from '../personas/index.js';
 
-export function buildProposerPrompt(round, baseContext, proposerOutput, criticOutputs, proposerRole, initialFeedback) {
+const roundMode = (roundMeta = {}) => ((roundMeta.round || 1) <= 2 ? 'DISCOVERY' : 'CLOSURE');
+const fileList = (paths = []) => paths.filter(Boolean).map((p) => `- \`${p}\``).join('\n') || '- (none)';
+
+const buildRoundBudgetHeader = (roundMeta = {}) => {
+  const round = roundMeta.round || 1;
+  const maxRounds = roundMeta.maxRounds || 1;
+  const roundsLeft = typeof roundMeta.roundsLeft === 'number' ? roundMeta.roundsLeft : Math.max(maxRounds - round, 0);
+  const finalRound = roundsLeft === 0;
+  return renderPersonaTemplate('councilBudgetHeaderTemplate', {
+    ROUND: round,
+    MAX_ROUNDS: maxRounds,
+    ROUNDS_LEFT: roundsLeft,
+    URGENCY_LINE: finalRound
+      ? 'FINAL ROUND: produce a decision-ready artifact now.'
+      : 'Use budget carefully. Converge; avoid exploratory rescans.',
+    POLICY_LINE: finalRound
+      ? 'No further rounds exist. Mark unresolved items explicitly.'
+      : 'No reopen without new file evidence.',
+  });
+};
+
+const buildProtocolHeader = (roundMeta = {}) => {
+  const mode = roundMode(roundMeta);
+  const round = roundMeta.round || 1;
+  const maxRounds = roundMeta.maxRounds || 1;
+  const roundsLeft = typeof roundMeta.roundsLeft === 'number' ? roundMeta.roundsLeft : Math.max(maxRounds - round, 0);
+  return renderPersonaTemplate('councilProtocolHeaderTemplate', {
+    MODE: mode,
+    ROUND: round,
+    MAX_ROUNDS: maxRounds,
+    ROUNDS_LEFT: roundsLeft,
+    OPEN_BLOCKERS: '- Read `shared/blockers.md` and update only with file-backed evidence.',
+    ALLOWED_MOVES: mode === 'DISCOVERY'
+      ? '- Add net-new blocker classes with evidence.\n- Mark NO_NEW_BLOCKERS when applicable.'
+      : '- Verify unresolved blockers and close them.\n- Prefer READY_FOR_AGREEMENT when no blocker remains.',
+    FORBIDDEN_MOVES: mode === 'DISCOVERY'
+      ? '- No speculative blockers.\n- No style-only objections.'
+      : '- No broad rescans.\n- No reopen without new evidence.',
+    DECISION_RULE: mode === 'DISCOVERY'
+      ? 'Build high-signal blocker inventory.'
+      : 'Close blockers and converge to final decision.',
+  });
+};
+
+const buildArtifactBlock = (title, paths) => `## ${title}\n${fileList(paths)}`;
+
+const artifactSections = (roundMeta = {}, stage) => {
+  const artifacts = roundMeta.artifacts || {};
+  const reads = [
+    artifacts?.shared?.ticketContext,
+    artifacts?.shared?.roles,
+    artifacts?.shared?.scopeLock,
+    artifacts?.shared?.blockers,
+    artifacts?.shared?.decisions,
+    artifacts?.shared?.evaluatorFeedback,
+    artifacts?.shared?.protocol,
+    artifacts?.round?.proposer,
+    ...(artifacts?.round?.critics || []),
+    artifacts?.round?.agreement,
+    artifacts?.round?.evaluation,
+  ];
+
+  const writesByStage = {
+    proposer: [artifacts?.round?.proposer, artifacts?.shared?.scopeLock, artifacts?.shared?.decisions],
+    critic: [artifacts?.round?.criticCurrent, artifacts?.shared?.blockers, artifacts?.shared?.decisions],
+    agreement: [artifacts?.round?.agreement, artifacts?.round?.control, artifacts?.shared?.decisions],
+  };
+
+  return `${buildArtifactBlock('Required Reads', reads)}\n\n${buildArtifactBlock('Required Writes', writesByStage[stage] || [])}`;
+};
+
+export function buildProposerPrompt(round, baseContext, proposerOutput, criticOutputs, proposerRole, initialFeedback, roundMeta) {
+  const budget = buildRoundBudgetHeader(roundMeta);
+  const protocol = buildProtocolHeader(roundMeta);
+  const artifacts = artifactSections(roundMeta, 'proposer');
   if (round === 1) {
-    let prompt = `${baseContext}\n\nYou are the Proposer. ${proposerRole}`;
-    if (initialFeedback) {
-      prompt += `\n\n## Previous Feedback\n${initialFeedback}`;
-    }
-    return prompt;
+    return renderPersonaTemplate('councilProposerRound1Template', {
+      BASE_CONTEXT: baseContext,
+      BUDGET_HEADER: budget,
+      PROTOCOL_HEADER: `${protocol}\n\n${artifacts}`,
+      PROPOSER_ROLE: proposerRole,
+      PREVIOUS_FEEDBACK_BLOCK: initialFeedback ? `## Previous Feedback\n${initialFeedback}` : '',
+    });
   }
 
-  const critiqueSummary = criticOutputs.length > 0
-    ? criticOutputs.map(c => `### Critic ${c.index} (agent-${c.index})\n${c.output}`).join('\n\n')
-    : '(No critic feedback available)';
-  return `${baseContext}\n\n` +
-    '## Your Previous Proposal\n' + proposerOutput + '\n\n' +
-    `## Critiques (${criticOutputs.length})\n` + critiqueSummary + '\n\n' +
-    `${criticOutputs.length} critic(s) reviewed your approach. Respond to their points. ` +
-    'Revise your strategy or defend it with evidence from the codebase. ' +
-    'Converge toward a final unified plan.';
+  return renderPersonaTemplate('councilProposerRoundNTemplate', {
+    BASE_CONTEXT: baseContext,
+    BUDGET_HEADER: budget,
+    PROTOCOL_HEADER: `${protocol}\n\n${artifacts}`,
+    PROPOSER_OUTPUT: 'Use `rounds/round-(N-1)/proposer.md` and shared files as source of truth.',
+    CRITIC_COUNT: 0,
+    CRITIQUE_SUMMARY: 'Read critic files directly from `rounds/round-(N-1)/critic-*.md`.',
+  });
 }
 
-export function buildCriticPrompt(round, baseContext, proposerOutput, criticOutputs, criticIndex, criticRole) {
-  const priorCritiques = criticOutputs.length > 0
-    ? '\n\n## Prior Critiques This Round\n' + criticOutputs.map(c => `### Critic ${c.index}\n${c.output}`).join('\n\n')
-    : '';
+export function buildCriticPrompt(round, baseContext, proposerOutput, criticOutputs, criticIndex, criticRole, roundMeta) {
+  const budget = buildRoundBudgetHeader(roundMeta);
+  const protocol = buildProtocolHeader(roundMeta);
+  const modePersona = roundMode(roundMeta) === 'DISCOVERY' ? getPersona('councilCriticDiscovery') : getPersona('councilCriticClosure');
+  const artifacts = artifactSections(roundMeta, 'critic');
+  const vars = {
+    BASE_CONTEXT: baseContext,
+    BUDGET_HEADER: budget,
+    PROTOCOL_HEADER: `${protocol}\n\n${artifacts}`,
+    PROPOSER_OUTPUT: 'Read current proposer artifact from this round.',
+    PRIOR_CRITIQUES_BLOCK: 'Read prior critic artifacts from this round.',
+    CRITIC_INDEX: criticIndex,
+    CRITIC_ROLE: modePersona || criticRole,
+  };
 
-  if (round === 1) {
-    return `${baseContext}\n\n` +
-      '## Proposer\'s Proposal\n' + proposerOutput +
-      priorCritiques + '\n\n' +
-      `You are Critic ${criticIndex} (agent-${criticIndex}). ${criticRole}\n\n` +
-      'IMPORTANT: Do NOT just agree with the proposal. Your value is in finding what\'s WRONG or MISSING.';
-  }
-
-  return `${baseContext}\n\n` +
-    '## Proposer\'s Latest Proposal\n' + proposerOutput +
-    priorCritiques + '\n\n' +
-    `You are Critic ${criticIndex} (agent-${criticIndex}). ${criticRole}\n\n` +
-    'The Proposer responded to previous critiques. Verify their fixes are correct. ' +
-    'Find any remaining issues. Do NOT agree unless you have independently verified their claims in the codebase.';
+  return round === 1
+    ? renderPersonaTemplate('councilCriticRound1Template', vars)
+    : renderPersonaTemplate('councilCriticRoundNTemplate', vars);
 }
 
-export function buildAgreementPrompt(baseContext, proposerOutput, criticOutputs, agreementRole) {
-  const critiqueSummary = criticOutputs.map(c => `### Critic ${c.index}\n${c.output}`).join('\n\n');
-  const role = agreementRole || DEFAULT_AGREEMENT_ROLE;
-  return `${baseContext}\n\n` +
-    '## Your Proposal\n' + proposerOutput + '\n\n' +
-    `## Critiques (${criticOutputs.length})\n` + critiqueSummary + '\n\n' +
-    `You are the Proposer. ${role}`;
+export function buildAgreementPrompt(baseContext, proposerOutput, criticOutputs, agreementRole, roundMeta) {
+  const budget = buildRoundBudgetHeader(roundMeta);
+  const protocol = buildProtocolHeader(roundMeta);
+  const artifacts = artifactSections(roundMeta, 'agreement');
+  const role = getPersona('councilAgreementArbiter') || agreementRole || DEFAULT_AGREEMENT_ROLE;
+  return renderPersonaTemplate('councilAgreementTemplate', {
+    BASE_CONTEXT: baseContext,
+    BUDGET_HEADER: budget,
+    PROTOCOL_HEADER: `${protocol}\n\n${artifacts}`,
+    PROPOSER_OUTPUT: 'Use this round proposer artifact and shared blocker ledger as truth.',
+    CRITIC_COUNT: 0,
+    CRITIQUE_SUMMARY: 'Use this round critic artifacts and blockers ledger for closure table.',
+    AGREEMENT_ROLE: role,
+  });
 }

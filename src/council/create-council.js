@@ -1,19 +1,30 @@
 /**
- * Council — a group of AI agents that collaborate, discuss, and produce
- * actionable outputs. Discussions happen via files for full visibility.
- * Agents have session memory to avoid rework across rounds.
+ * Council Factory - validates setup and returns runnable council instance.
  *
- * Flow per round:
- *   1. Proposer (agent-0): proposes strategy (round 1) or revises (round 2+)
- *   2. Critics (agent-1..N): each critiques, sees prior critics' outputs
- *   3. Agreement: proposer synthesizes critiques → AGREED/DISAGREE
- *   4. Evaluate: structural + AI quality gate
+ * Responsibility:
+ * - Validate required caller inputs once.
+ * - Provide a thin { run() } API that delegates orchestration.
  *
- * The caller defines: goal, context, role instructions, evaluation criteria,
- * and output format. The council handles the rest.
+ * Contract:
+ * - Throws early if required fields are missing.
+ * - Does not execute any stage work until run() is called.
  */
 
 import { runCouncil } from './orchestrator/run-council.js';
+import { warn } from '../utils/logger.js';
+
+const REQUIRED_PATHS = Object.freeze([
+  'goal',
+  'context',
+  'roles.proposer',
+  'roles.critic',
+  'prompts.buildProposer',
+  'prompts.buildCritic',
+  'prompts.buildAgreement',
+  'evaluation.buildAiPrompt',
+  'evaluation.outputMarkers',
+  'config',
+]);
 
 /**
  * Create a configured council instance.
@@ -55,13 +66,10 @@ export function createCouncil(opts) {
     feedback,
   } = opts || {};
 
-  const requiredPaths = ['goal','context','roles.proposer','roles.critic','prompts.buildProposer','prompts.buildCritic','prompts.buildAgreement','evaluation.buildAiPrompt','evaluation.outputMarkers','config'];
   const root = { goal, context, roles, prompts, evaluation, config };
-  // Validate nested required fields via dot-path lookup in one pass.
-  const missing = requiredPaths.filter((fieldPath) => !fieldPath.split('.').reduce((acc, key) => (acc == null ? undefined : acc[key]), root));
-  if (missing.length > 0) {
-    throw new Error(`Council requires: ${missing.join(', ')}`);
-  }
+  const missing = findMissingRequiredPaths(root, REQUIRED_PATHS);
+  if (missing.length > 0) throw new Error(`Council requires: ${missing.join(', ')}`);
+  if (!workingDir) warn('Council created without workingDir; tooling may run in process cwd');
 
   return {
     run: () => runCouncil({
@@ -78,3 +86,6 @@ export function createCouncil(opts) {
     }),
   };
 }
+
+const findMissingRequiredPaths = (root, requiredPaths) => requiredPaths.filter((fieldPath) => !readPath(root, fieldPath));
+const readPath = (target, fieldPath) => fieldPath.split('.').reduce((acc, key) => (acc == null ? undefined : acc[key]), target);

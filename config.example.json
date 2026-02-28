@@ -54,6 +54,12 @@
   },
   "council": {
     "maxRounds": 3,
+    "failClosed": true,
+    "forceOnLastRound": false,
+    "forceBestEffortOnMaxRounds": false,
+    "noveltyThreshold": 0.2,
+    "lowNoveltyStreakLimit": 2,
+    "minRoundsBeforeConvergence": 2,
     "proposer": {
       "provider": "claude",
       "model": "sonnet",
@@ -68,6 +74,11 @@
         "maxTurns": 15,
         "timeoutMinutes": 10,
         "allowedTools": "Read,Glob,Grep"
+      },
+      {
+        "provider": "codex",
+        "model": "gpt-5.3-codex",
+        "timeoutMinutes": 10
       }
     ],
     "evaluator": {

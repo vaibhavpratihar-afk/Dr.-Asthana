@@ -1,12 +1,18 @@
 /**
- * Contract file reader — reads and validates structured JSON contracts
- * written by agents via the Write tool.
+ * Contract Reader - strict parser/validator for on-disk agent contracts.
  *
- * Falls back gracefully when files are missing or malformed.
+ * Responsibility:
+ * - Read agreement/evaluation JSON files and validate allowed values.
+ *
+ * Contract:
+ * - Never throws to caller for malformed/missing files.
+ * - Always returns a typed shape with { valid, ... } and a reason on failure.
  */
 
 import fs from 'fs';
 import { warn, debug } from '../../utils/logger.js';
+
+const AGREEMENT_DECISIONS = new Set(['AGREED', 'DISAGREE']);
 
 /**
  * Read and validate an agreement contract file.
@@ -20,13 +26,11 @@ export function readAgreementContract(contractPath) {
   const raw = readJsonFile(contractPath);
   if (!raw.valid) return raw;
 
-  const { decision } = raw.data;
-  if (typeof decision !== 'string' || !['AGREED', 'DISAGREE'].includes(decision.toUpperCase())) {
-    return { valid: false, reason: `Invalid decision value: ${JSON.stringify(decision)}` };
-  }
+  const decision = normalizeUpperString(raw.data.decision);
+  if (!decision || !AGREEMENT_DECISIONS.has(decision)) return invalidDecision(raw.data.decision);
 
   debug(`Agreement contract read: decision=${decision}`);
-  return { valid: true, decision: decision.toUpperCase(), reasoning: raw.data.reasoning || null };
+  return { valid: true, decision, reasoning: raw.data.reasoning || null };
 }
 
 /**
@@ -45,17 +49,11 @@ export function readEvaluationContract(contractPath, opts = {}) {
   const raw = readJsonFile(contractPath);
   if (!raw.valid) return raw;
 
-  const { verdict } = raw.data;
-  if (typeof verdict !== 'string') {
-    return { valid: false, reason: `Missing or non-string verdict field` };
-  }
+  const upper = normalizeUpperString(raw.data.verdict);
+  if (!upper) return { valid: false, reason: 'Missing or non-string verdict field' };
+  if (upper !== approvalKeyword && upper !== rejectionKeyword) return invalidVerdict(raw.data.verdict, approvalKeyword, rejectionKeyword);
 
-  const upper = verdict.toUpperCase();
-  if (upper !== approvalKeyword && upper !== rejectionKeyword) {
-    return { valid: false, reason: `Verdict "${verdict}" does not match ${approvalKeyword} or ${rejectionKeyword}` };
-  }
-
-  debug(`Evaluation contract read: verdict=${verdict}`);
+  debug(`Evaluation contract read: verdict=${upper}`);
   return {
     valid: true,
     verdict: upper,
@@ -67,7 +65,7 @@ export function readEvaluationContract(contractPath, opts = {}) {
 /**
  * Read and parse a JSON file from disk. Returns { valid, data } or { valid: false, reason }.
  */
-function readJsonFile(filePath) {
+const readJsonFile = (filePath) => {
   try {
     if (!fs.existsSync(filePath)) {
       return { valid: false, reason: 'Contract file not found' };
@@ -82,4 +80,11 @@ function readJsonFile(filePath) {
     warn(`Failed to read contract file ${filePath}: ${err.message}`);
     return { valid: false, reason: `Parse error: ${err.message}` };
   }
-}
+};
+
+const normalizeUpperString = (value) => (typeof value === 'string' ? value.toUpperCase() : null);
+const invalidDecision = (decision) => ({ valid: false, reason: `Invalid decision value: ${JSON.stringify(decision)}` });
+const invalidVerdict = (verdict, approvalKeyword, rejectionKeyword) => ({
+  valid: false,
+  reason: `Verdict "${verdict}" does not match ${approvalKeyword} or ${rejectionKeyword}`,
+});

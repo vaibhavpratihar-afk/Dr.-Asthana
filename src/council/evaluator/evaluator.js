@@ -1,16 +1,14 @@
 /**
- * Council evaluator — configurable quality gate.
+ * Evaluator - final quality gate for council output.
  *
- * Runs structural pre-checks (fast, no API calls) then an AI evaluator
- * to judge council output and extract a clean result.
+ * Responsibility:
+ * - Run structural checks and evaluator agents in deterministic order.
+ * - Read verdict from JSON contract instead of free-form model prose.
  *
- * The caller configures:
- *  - structural check function
- *  - AI prompt builder
- *  - output markers for extraction
- *  - approval/rejection keywords
- *
- * All AI spawning goes through the AI Provider module via runAI().
+ * Contract:
+ * - Returns { passed, feedback, output } only.
+ * - In non-forced mode, structural failure rejects immediately.
+ * - In forced mode, may approve best-effort output after evaluator failures.
  */
 
 import fs from 'fs';
@@ -18,196 +16,164 @@ import path from 'path';
 import { runAI } from '../../ai-provider/index.js';
 import { isGarbageOutput } from '../../ai-provider/provider.js';
 import { buildEvaluationContractPrompt, readEvaluationContract } from '../contract/index.js';
-import { defaultStructuralCheck, DEFAULT_APPROVAL_KEYWORD, DEFAULT_REJECTION_KEYWORD, DEFAULT_FEEDBACK_MARKER } from '../config/defaults.js';
+import {
+  defaultStructuralCheck,
+  DEFAULT_APPROVAL_KEYWORD,
+  DEFAULT_REJECTION_KEYWORD,
+} from '../config/defaults.js';
 import { log, warn } from '../../utils/logger.js';
 
-/**
- * Evaluate council output using configurable structural + AI checks.
- *
- * @param {string} councilOutput - Combined output from council rounds
- * @param {object} evalOpts - Evaluation configuration from createCouncil
- * @param {function} [evalOpts.structural] - Structural pre-check: (output) => {passed, feedback}
- * @param {function} evalOpts.buildAiPrompt - (councilOutput, context, force) => prompt string
- * @param {{start: string, end: string}} evalOpts.outputMarkers - Extraction markers
- * @param {string} [evalOpts.approvalKeyword] - Keyword indicating approval
- * @param {string} [evalOpts.rejectionKeyword] - Keyword indicating rejection
- * @param {string} [evalOpts.feedbackMarker] - Marker before feedback text
- * @param {string} evalOpts.context - Context passed to buildAiPrompt
- * @param {object} evalOpts.config - Full config object
- * @param {string} evalOpts.label - Label for log filenames
- * @param {boolean} [force=false] - Force produce best-effort output
- * @returns {Promise<{passed: boolean, feedback: string, output: string|null}>}
- */
-export async function evaluate(councilOutput, evalOpts, force = false) {
+const DEFAULT_EVALUATOR = Object.freeze({
+  provider: 'claude',
+  model: 'sonnet',
+  maxTurns: 5,
+  timeoutMinutes: 5,
+  allowedTools: 'Read,Glob,Grep',
+});
+
+const approve = (output, feedback = '') => ({ passed: true, feedback, output });
+const reject = (feedback) => ({ passed: false, feedback, output: null });
+const addWriteTool = (allowedTools) => (!allowedTools ? 'Read,Write,Glob,Grep' : (allowedTools.includes('Write') ? allowedTools : `${allowedTools},Write`));
+const normalizeEvaluators = (evalConfig) => (Array.isArray(evalConfig) && evalConfig.length ? evalConfig : (evalConfig && typeof evalConfig === 'object' ? [evalConfig] : [DEFAULT_EVALUATOR]));
+
+const resolveContractPaths = ({ workspace, round, workingDir, label }) => {
+  const safeRound = Number.isInteger(round) && round > 0 ? round : 0;
+  const contractPath = path.join(workingDir || process.cwd(), 'council-contracts', label || 'eval', `round-${safeRound}`, 'evaluation-contract.json');
+  const workspaceContractPath = workspace ? path.join(workspace, `round-${safeRound}`, 'evaluation-contract.json') : null;
+  return { contractPath, workspaceContractPath };
+};
+
+const clearContractFiles = ({ contractPath, workspaceContractPath }) => {
+  if (contractPath) try { fs.unlinkSync(contractPath); } catch { /* ignore */ }
+  if (workspaceContractPath) try { fs.unlinkSync(workspaceContractPath); } catch { /* ignore */ }
+};
+
+const mirrorContractToWorkspace = ({ contractPath, workspaceContractPath }) => {
+  if (!workspaceContractPath || !contractPath || !fs.existsSync(contractPath)) return;
+  try {
+    fs.mkdirSync(path.dirname(workspaceContractPath), { recursive: true });
+    fs.copyFileSync(contractPath, workspaceContractPath);
+  } catch { /* observability copy only */ }
+};
+
+const extractByMarkers = (output, markers) => {
+  if (!markers?.start || !markers?.end) return null;
+  const startIdx = output.indexOf(markers.start);
+  const endIdx = output.indexOf(markers.end);
+  if (startIdx === -1 || endIdx === -1 || endIdx <= startIdx) return null;
+  return output.substring(startIdx + markers.start.length, endIdx).trim();
+};
+
+const buildRuntime = (councilOutput, evalOpts, force) => {
   const {
     structural = defaultStructuralCheck,
     buildAiPrompt,
     outputMarkers,
     approvalKeyword = DEFAULT_APPROVAL_KEYWORD,
     rejectionKeyword = DEFAULT_REJECTION_KEYWORD,
-    feedbackMarker = DEFAULT_FEEDBACK_MARKER,
     context,
     config,
     label = 'eval',
     workspace = null,
     round = null,
+    workingDir = process.cwd(),
   } = evalOpts;
 
-  // Structural pre-check (fast, no API calls)
-  const structuralResult = structural(councilOutput);
-  if (!force && !structuralResult.passed) {
-    return { passed: false, feedback: structuralResult.feedback, output: null };
+  return {
+    councilOutput,
+    structural,
+    buildAiPrompt,
+    outputMarkers,
+    context,
+    config,
+    label,
+    force,
+    keywords: {
+      approval: approvalKeyword.toUpperCase(),
+      rejection: rejectionKeyword.toUpperCase(),
+    },
+    evaluators: normalizeEvaluators(config?.council?.evaluator || null),
+    paths: resolveContractPaths({ workspace, round, workingDir, label }),
+    workingDir,
+  };
+};
+
+const runOneEvaluator = async (runtime, evaluator, index, prompt) => {
+  const evLabel = `evaluator-${index}${runtime.force ? '-force' : ''}`;
+  log(`[${evLabel}] provider=${evaluator.provider}, model=${evaluator.model || 'default'}`);
+  clearContractFiles(runtime.paths);
+
+  try {
+    const providerConfig = { ...evaluator, allowedTools: addWriteTool(evaluator.allowedTools) };
+    const result = await runAI({
+      prompt,
+      workingDir: runtime.workingDir,
+      mode: 'evaluate',
+      label: evLabel,
+      logDir: runtime.config.agent.logDir,
+      ticketKey: runtime.label,
+      config: runtime.config,
+      providerConfig,
+    });
+    const output = result.output || '';
+    if (isGarbageOutput(output)) return { status: 'retry', reason: 'garbage output' };
+
+    mirrorContractToWorkspace(runtime.paths);
+    const contract = readEvaluationContract(runtime.paths.contractPath, {
+      approvalKeyword: runtime.keywords.approval,
+      rejectionKeyword: runtime.keywords.rejection,
+    });
+    if (!contract.valid) return { status: 'retry', reason: `invalid contract: ${contract.reason}` };
+
+    switch (contract.verdict) {
+      case runtime.keywords.approval: {
+        const extracted = extractByMarkers(output, runtime.outputMarkers);
+        return { status: 'approved', output: extracted && extracted.length > 100 ? extracted : runtime.councilOutput };
+      }
+      default: {
+        const feedback = contract.feedback || contract.issues?.join('; ') || 'Evaluator rejected without specific feedback';
+        return runtime.force ? { status: 'retry', reason: 'rejected during forced mode' } : { status: 'rejected', feedback };
+      }
+    }
+  } catch (err) {
+    return { status: 'retry', reason: err.message };
   }
+};
 
-  // Resolve evaluator list from council config
-  const evalConfig = config.council?.evaluator || null;
-  const evaluators = resolveEvaluators(evalConfig);
+/**
+ * Evaluate council output with strict contract-driven verdict parsing.
+ *
+ * @param {string} councilOutput
+ * @param {object} evalOpts
+ * @param {boolean} [force=false]
+ * @returns {Promise<{passed: boolean, feedback: string, output: string|null}>}
+ */
+export async function evaluate(councilOutput, evalOpts, force = false) {
+  const runtime = buildRuntime(councilOutput, evalOpts, force);
 
-  // Contract path for structured evaluation output
-  const contractPath = (workspace && round) ? path.join(workspace, `round-${round}`, 'evaluation-contract.json') : null;
+  // Structural gate prevents wasted evaluator calls in normal mode.
+  const structuralResult = runtime.structural(councilOutput);
+  if (!runtime.force && !structuralResult.passed) return reject(structuralResult.feedback);
 
-  let prompt = buildAiPrompt(councilOutput, context, force);
-  if (contractPath) {
-    prompt += buildEvaluationContractPrompt(contractPath, { approvalKeyword, rejectionKeyword });
-  }
+  fs.mkdirSync(path.dirname(runtime.paths.contractPath), { recursive: true });
+  const prompt = `${runtime.buildAiPrompt(runtime.councilOutput, runtime.context, runtime.force)}${buildEvaluationContractPrompt(runtime.paths.contractPath, {
+    approvalKeyword: runtime.keywords.approval,
+    rejectionKeyword: runtime.keywords.rejection,
+  })}`;
 
-  // N-evaluator loop with first-success strategy
-  for (let i = 0; i < evaluators.length; i++) {
-    const evConfig = evaluators[i];
-    const evLabel = `evaluator-${i}${force ? '-force' : ''}`;
-
-    log(`[${evLabel}] Trying evaluator ${i + 1}/${evaluators.length}: provider=${evConfig.provider}, model=${evConfig.model || 'default'}`);
-
-    // Clean up stale contract file from previous evaluator attempt
-    if (contractPath) try { fs.unlinkSync(contractPath); } catch { /* ignore */ }
-
-    // Override allowedTools to add Write if contract path is available
-    const providerConfig = contractPath
-      ? { ...evConfig, allowedTools: addWriteTool(evConfig.allowedTools) }
-      : evConfig;
-
-    try {
-      const result = await runAI({
-        prompt,
-        workingDir: process.cwd(),
-        mode: 'evaluate',
-        label: evLabel,
-        logDir: config.agent.logDir,
-        ticketKey: label,
-        config,
-        providerConfig,
-      });
-
-      const rawOutput = result.output || '';
-
-      if (isGarbageOutput(rawOutput)) {
-        warn(`[${evLabel}] Produced garbage output, skipping`);
-        continue;
-      }
-
-      // Try contract file first
-      if (contractPath) {
-        const contract = readEvaluationContract(contractPath, { approvalKeyword, rejectionKeyword });
-        if (contract.valid) {
-          log(`[${evLabel}] Evaluation via contract: ${contract.verdict}`);
-          if (contract.verdict === approvalKeyword.toUpperCase()) {
-            const extracted = extractByMarkers(rawOutput, outputMarkers);
-            if (extracted && extracted.length > 100) {
-              return { passed: true, feedback: '', output: extracted };
-            }
-            return { passed: true, feedback: '', output: councilOutput };
-          }
-          if (!force) {
-            const feedback = contract.feedback || contract.issues?.join('; ') || 'Evaluator rejected without specific feedback';
-            return { passed: false, feedback, output: null };
-          }
-          // Force mode with rejection contract — extract best-effort below
-        } else {
-          warn(`[${evLabel}] Contract file not found or invalid (${contract.reason}), falling back to keyword matching`);
-        }
-      }
-
-      // Fallback: keyword matching in raw output (original logic)
-      if (rawOutput.includes(approvalKeyword)) {
-        const extracted = extractByMarkers(rawOutput, outputMarkers);
-        if (extracted && extracted.length > 100) {
-          return { passed: true, feedback: '', output: extracted };
-        }
-        return { passed: true, feedback: '', output: councilOutput };
-      }
-
-      if (rawOutput.includes(rejectionKeyword) && !force) {
-        const feedback = extractFeedback(rawOutput, feedbackMarker, rejectionKeyword);
-        return { passed: false, feedback: feedback || 'Evaluator rejected without specific feedback', output: null };
-      }
-
-      // Force mode or ambiguous response — extract best-effort
-      if (force) {
-        const extracted = extractByMarkers(rawOutput, outputMarkers) || councilOutput;
-        return { passed: true, feedback: 'Forced extraction', output: extracted };
-      }
-
-      warn(`[${evLabel}] Produced ambiguous response, skipping`);
-      continue;
-
-    } catch (err) {
-      warn(`[${evLabel}] Failed: ${err.message}`);
-      continue;
+  for (let index = 0; index < runtime.evaluators.length; index++) {
+    const outcome = await runOneEvaluator(runtime, runtime.evaluators[index], index, prompt);
+    // Single status switch keeps evaluator loop deterministic and linear.
+    switch (outcome.status) {
+      case 'approved':
+        return approve(outcome.output);
+      case 'rejected':
+        return reject(outcome.feedback);
+      default:
+        warn(`[evaluator-${index}] Skipping outcome: ${outcome.reason}`);
     }
   }
 
-  // All evaluators failed
-  warn('All evaluators failed or produced garbage output');
-  if (force) {
-    return { passed: true, feedback: 'All evaluators failed, using raw council output', output: councilOutput };
-  }
-  return { passed: false, feedback: 'All evaluators failed to produce a valid response', output: null };
-}
-
-/**
- * Resolve evaluator list from council config.
- */
-function resolveEvaluators(evalConfig) {
-  if (Array.isArray(evalConfig) && evalConfig.length > 0) return evalConfig;
-  if (evalConfig && typeof evalConfig === 'object') return [evalConfig];
-  return [{ provider: 'claude', model: 'sonnet', maxTurns: 5, timeoutMinutes: 5, allowedTools: 'Read,Glob,Grep' }];
-}
-
-/** Append Write to a comma-separated allowedTools string if not already present. */
-function addWriteTool(allowedTools) {
-  if (!allowedTools) return 'Read,Write,Glob,Grep';
-  return allowedTools.includes('Write') ? allowedTools : `${allowedTools},Write`;
-}
-
-/**
- * Extract content between configurable markers.
- * Falls back to extracting everything after the approval keyword.
- */
-function extractByMarkers(output, markers) {
-  const { start, end } = markers;
-  const startIdx = output.indexOf(start);
-  const endIdx = output.indexOf(end);
-
-  if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
-    return output.substring(startIdx + start.length, endIdx).trim();
-  }
-
-  return null;
-}
-
-/**
- * Extract feedback text after a configurable marker.
- */
-function extractFeedback(output, marker, rejectionKeyword) {
-  const idx = output.indexOf(marker);
-  if (idx !== -1) {
-    return output.substring(idx + marker.length).trim();
-  }
-
-  const rejectedIdx = output.indexOf(rejectionKeyword);
-  if (rejectedIdx !== -1) {
-    return output.substring(rejectedIdx + rejectionKeyword.length).trim().substring(0, 500);
-  }
-
-  return null;
+  if (runtime.force) return approve(runtime.councilOutput, 'Forced pass: all evaluators failed or were inconclusive');
+  return reject('All evaluators failed or returned inconclusive contracts');
 }

@@ -1,18 +1,20 @@
 /**
- * Default values for council configuration.
+ * Council Defaults - shared baseline constants and structural gate.
  *
- * Callers can override any of these via createCouncil() options.
+ * Responsibility:
+ * - Hold default role text and evaluator keywords.
+ * - Provide a cheap structural pre-check before expensive model calls.
+ *
+ * Contract:
+ * - Exported constants are stable defaults, overridable by caller config.
+ * - defaultStructuralCheck returns { passed, feedback } only.
  */
 
 export const DEFAULT_AGREEMENT_ROLE =
-  'Review all critique(s) carefully. For each issue raised by critics, explain with evidence (file paths, line numbers) whether it is valid or invalid.\n\n' +
-  'AGREED means your EXISTING plan already handles every valid critique WITHOUT changes. ' +
-  'Use AGREED only when you can point to specific parts of your original proposal that already cover each critique.\n\n' +
-  'DISAGREE means at least one valid critique requires you to CHANGE your plan. ' +
-  'Respond DISAGREE followed by your complete revised plan incorporating the fixes. ' +
-  'This is normal and expected — it means the debate is working.\n\n' +
-  'In other words: if you need to add, remove, or modify ANY step in your plan to address a critique, that is a DISAGREE.\n\n' +
-  'Your response MUST start with either AGREED or DISAGREE on the first line.';
+  'Review all critique(s) carefully. For each issue raised by critics, explain with evidence whether it is valid or invalid.\n\n' +
+  'Use AGREED only if all valid critiques are already addressed without changing the plan.\n\n' +
+  'Use DISAGREE if any valid critique requires plan changes. If DISAGREE, return a complete revised plan.\n\n' +
+  'Your response must start with AGREED or DISAGREE on the first line.';
 
 export const DEFAULT_APPROVAL_KEYWORD = 'APPROVED';
 export const DEFAULT_REJECTION_KEYWORD = 'REJECTED';

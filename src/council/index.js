@@ -1,8 +1,11 @@
 /**
- * Council Module — public API.
+ * Council Public API.
  *
- * A group of AI agents that collaborate, discuss via files, and produce
- * actionable outputs judged by caller-defined acceptance criteria.
+ * Responsibility:
+ * - Export stable constructor surface for council consumers.
+ *
+ * Contract:
+ * - This file stays intentionally thin to keep public imports predictable.
  */
 
 export { createCouncil } from './create-council.js';
