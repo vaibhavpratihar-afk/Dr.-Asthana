@@ -18,7 +18,7 @@ export async function runEvaluationStage({ round, maxRounds, workspace, label, c
   updateStatus(workspace, label, maxRounds, round, 'evaluating', { agreed: criticOutputs.length === 0 ? undefined : /AGREED/i.test(lastCouncilOutput) });
 
   log(`[Round ${round}] Evaluating council output${forceEval && !/Agreed/.test(lastCouncilOutput) ? ' (forced, last round)' : ''}...`);
-  const result = await evaluate(lastCouncilOutput, evalOpts, forceEval);
+  const result = await evaluate(lastCouncilOutput, { ...evalOpts, round }, forceEval);
   writeRoundFile(workspace, round, 'evaluation.md', `# Evaluation\n\n**Passed:** ${result.passed}\n\n${result.feedback || result.output || ''}`);
   if (result.passed) {
     log(`Council approved after round ${round}`);
