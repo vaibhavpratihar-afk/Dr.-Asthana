@@ -10,6 +10,7 @@
  * - JSON files are reserved for deterministic control contracts.
  */
 
+import fs from 'fs';
 import { DEFAULT_AGREEMENT_ROLE } from '../council/config/defaults.js';
 import { getPersona, renderPersonaTemplate } from '../personas/index.js';
 
@@ -59,9 +60,13 @@ const buildProtocolHeader = (roundMeta = {}) => {
 
 const buildArtifactBlock = (title, paths) => `## ${title}\n${fileList(paths)}`;
 
+const existsOnDisk = (p) => p && fs.existsSync(p);
+
 const artifactSections = (roundMeta = {}, stage) => {
   const artifacts = roundMeta.artifacts || {};
-  const reads = [
+
+  // Shared files are always seeded by initArtifacts; round files may not exist yet.
+  const sharedReads = [
     artifacts?.shared?.ticketContext,
     artifacts?.shared?.roles,
     artifacts?.shared?.scopeLock,
@@ -69,11 +74,15 @@ const artifactSections = (roundMeta = {}, stage) => {
     artifacts?.shared?.decisions,
     artifacts?.shared?.evaluatorFeedback,
     artifacts?.shared?.protocol,
+  ];
+  const roundReads = [
     artifacts?.round?.proposer,
     ...(artifacts?.round?.critics || []),
     artifacts?.round?.agreement,
     artifacts?.round?.evaluation,
-  ];
+  ].filter(existsOnDisk);
+
+  const reads = [...sharedReads, ...roundReads];
 
   const writesByStage = {
     proposer: [artifacts?.round?.proposer, artifacts?.shared?.scopeLock, artifacts?.shared?.decisions],
@@ -81,7 +90,7 @@ const artifactSections = (roundMeta = {}, stage) => {
     agreement: [artifacts?.round?.agreement, artifacts?.round?.control, artifacts?.shared?.decisions],
   };
 
-  return `${buildArtifactBlock('Required Reads', reads)}\n\n${buildArtifactBlock('Required Writes', writesByStage[stage] || [])}`;
+  return `${buildArtifactBlock('Required Reads', reads)}\n\n${buildArtifactBlock('Writable Artifacts', writesByStage[stage] || [])}\nYour main response will be captured and saved by the orchestrator. You may also write directly to shared artifacts (blockers, decisions, scope-lock) to update them.`;
 };
 
 export function buildProposerPrompt(round, baseContext, proposerOutput, criticOutputs, proposerRole, initialFeedback, roundMeta) {

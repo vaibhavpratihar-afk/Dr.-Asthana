@@ -106,7 +106,7 @@ export async function runCouncil({ goal, context, workingDir, roles, prompts, ev
   fs.mkdirSync(workspace, { recursive: true });
   const artifacts = initArtifacts({ workspace, goal, context, roles });
   const runtime = buildRuntime({ evaluation, context, config, label, workspace, workingDir, agents });
-  const baseContext = `Use shared artifact files under \`${workspace}\` as single source of truth.`;
+  const baseContext = `Use shared artifact files under \`${workspace}\` as single source of truth.\n\nYour working directory is \`${workingDir}\`. Use it for all source code reads and git verification. Paths in ticket context may reference the developer's local clone — always verify against your own working directory instead.`;
 
   logAgents(agents, maxRounds, goal);
 

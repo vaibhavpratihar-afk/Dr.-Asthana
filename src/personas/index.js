@@ -80,7 +80,8 @@ export function renderPersonaTemplate(name, values = {}, options = {}) {
   return output;
 }
 
-export function buildCouncilEvaluatorPrompt({ ticketContext, councilOutput, force }) {
+export function buildCouncilEvaluatorPrompt({ ticketContext, councilOutput, force, cheatsheetMarkers }) {
+  const markers = cheatsheetMarkers || { start: '=== CHEATSHEET START ===', end: '=== CHEATSHEET END ===' };
   const modeInstruction = force
     ? 'You MUST produce a cheatsheet even if the debate output is imperfect. Do your best.'
     : 'Only approve if the debate output contains a clear, actionable implementation plan.';
@@ -89,5 +90,7 @@ export function buildCouncilEvaluatorPrompt({ ticketContext, councilOutput, forc
     TICKET_CONTEXT: ticketContext || '',
     DEBATE_OUTPUT: councilOutput || '',
     MODE_INSTRUCTION: modeInstruction,
+    CHEATSHEET_START_MARKER: markers.start,
+    CHEATSHEET_END_MARKER: markers.end,
   });
 }

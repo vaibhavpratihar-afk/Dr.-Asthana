@@ -12,8 +12,8 @@
 const DEFAULT_PROPOSER = Object.freeze({
   provider: 'claude',
   model: 'sonnet',
-  maxTurns: 15,
-  timeoutMinutes: 10,
+  maxTurns: 50,
+  timeoutMinutes: 15,
 });
 
 export function resolveAgents(councilConfig) {

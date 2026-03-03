@@ -10,7 +10,7 @@ import { isGarbageOutput } from '../../ai-provider/provider.js';
 import { runAgent } from '../runtime/runner.js';
 import { appendHumanFeedback } from '../utils/feedback.js';
 import { updateStatus } from '../runtime/workspace.js';
-import { appendText, writeText } from '../runtime/files.js';
+import { appendText, readText, writeText } from '../runtime/files.js';
 import { log, warn } from '../../utils/logger.js';
 
 const stageSuccess = (reason, data = {}) => ({ ok: true, reason, data });
@@ -38,7 +38,9 @@ export async function runCriticsStage({ round, workspace, label, maxRounds, prom
       continue;
     }
 
-    writeText(criticFile, result.output);
+    // Preserve agent-written artifact; fall back to stdout capture if empty.
+    const existing = readText(criticFile, '');
+    if (!existing.trim()) writeText(criticFile, result.output);
     written.push(criticFile);
   }
 

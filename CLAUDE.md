@@ -36,6 +36,31 @@ Every stage must read shared artifacts directly.
 - `rounds/round-N/evaluation.md`
 - `rounds/round-N/control.json`
 
+### Contract Files
+- `rounds/round-N/agreement-contract.json`
+- `rounds/round-N/evaluation-contract.json`
+
+## Cheatsheet + Evaluation Rules
+
+- Proposer must emit a complete cheatsheet between:
+  - `=== CHEATSHEET START ===`
+  - `=== CHEATSHEET END ===`
+- Evaluator may approve without re-emitting cheatsheet; evaluator output markers are optional.
+- Evaluation reads combined proposer + agreement content.
+- On forced last-round evaluation, output still prefers extracted cheatsheet markers when present.
+
+## Prompt/Runtime Expectations
+
+- Agents are instructed to treat local `workingDir` as source of truth for code and git checks.
+- Artifact prompts define required reads and writable artifacts; round files are read only when they exist.
+- Main agent response is captured by orchestrator; direct writes to shared artifacts are allowed.
+
+## Review Council Scope
+
+- PR review personas are diff-scoped.
+- CRITICAL findings should be for defects introduced in changed lines/files.
+- Out-of-diff scope expansion is not a merge blocker by itself.
+
 ## Pipeline Steps
 
 - Fetch ticket

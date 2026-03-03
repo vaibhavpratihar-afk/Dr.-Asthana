@@ -65,7 +65,7 @@ export async function buildCheatsheet(ticketData, cloneDir, config, options = {}
       buildAgreement: buildAgreementPrompt,
     },
     evaluation: {
-      buildAiPrompt: (councilOutput, ticketContext, force) => buildCouncilEvaluatorPrompt({ councilOutput, ticketContext, force }),
+      buildAiPrompt: (councilOutput, ticketContext, force) => buildCouncilEvaluatorPrompt({ councilOutput, ticketContext, force, cheatsheetMarkers: CHEATSHEET_MARKERS }),
       outputMarkers: CHEATSHEET_MARKERS,
       forceOnLastRound: config.council?.forceOnLastRound === true,
     },

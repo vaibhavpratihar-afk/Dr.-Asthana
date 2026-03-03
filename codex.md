@@ -25,8 +25,22 @@ The council is file-backed.
 
 ### Required Behavior
 - Every stage reads shared files directly.
-- Every stage writes its own artifact files.
+- Stage outputs are captured to round artifacts by orchestrator fallback.
+- If an agent already wrote its artifact file, stage code preserves that file and does not overwrite it.
 - No semantic state handoff in JS objects beyond loop counters and static config.
+
+## Cheatsheet Contract
+
+- Proposer output must include markers:
+  - `=== CHEATSHEET START ===`
+  - `=== CHEATSHEET END ===`
+- Evaluators approve/reject via contract; on approval, cheatsheet extraction prefers evaluator markers, then proposer/council markers.
+- Force-mode fallback also extracts the marked cheatsheet when present.
+
+## Contract Files
+
+- Agreement contract: `rounds/round-N/agreement-contract.json`
+- Evaluation contract: `rounds/round-N/evaluation-contract.json`
 
 ## Shared Artifact Paths
 
@@ -44,6 +58,12 @@ The council is file-backed.
 - Prefer small reusable helpers.
 - Add intent comments where logic is non-obvious.
 - Maintain strict control-flow clarity in orchestrators.
+
+## Runtime Notes
+
+- Council prompts explicitly tell agents to use the local `workingDir` for source reads and git checks.
+- Codex provider cannot combine `exec resume` with `--add-dir`; when additional writable dirs are required, a fresh Codex session is started.
+- Proposer defaults: `maxTurns=50`, `timeoutMinutes=15`.
 
 ## Commands
 

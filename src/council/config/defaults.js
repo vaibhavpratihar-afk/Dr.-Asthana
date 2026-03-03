@@ -36,7 +36,7 @@ export function defaultStructuralCheck(output) {
     return { passed: false, feedback: 'Debate output mentions fewer than 2 file paths' };
   }
 
-  const actionPatterns = /\b(create|modify|add|remove|update|change|replace|delete|implement|refactor)\b/gi;
+  const actionPatterns = /\b(creat|modif|add|remov|updat|chang|replac|delet|implement|refactor)\w*\b/gi;
   const actionCount = (output.match(actionPatterns) || []).length;
   if (actionCount < 3) {
     return { passed: false, feedback: 'Debate output lacks actionable language (fewer than 3 action verbs)' };

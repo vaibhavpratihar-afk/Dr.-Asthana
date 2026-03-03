@@ -18,27 +18,26 @@ export function buildArgs(prompt, modeConfig) {
   const timeoutMinutes = modeConfig.timeoutMinutes || 15;
   const model = modeConfig.model || null;
   const resumeSessionId = modeConfig.resumeSessionId || null;
+  const additionalWritableDirs = modeConfig.additionalWritableDirs || [];
+
+  // Codex `exec resume` does not support --add-dir, so when additional
+  // writable dirs are needed we always start a fresh session. Council
+  // state lives in shared artifacts on disk, so conversation memory is
+  // not required for cross-round continuity.
+  const skipResume = resumeSessionId && additionalWritableDirs.length > 0;
+
+  const flags = ['--json', '--full-auto'];
+  if (model) flags.push('--model', model);
 
   let args;
 
-  if (resumeSessionId) {
-    // Resume: codex exec resume <threadId> "<prompt>" --json --full-auto
-    args = [
-      'exec', 'resume', resumeSessionId, prompt,
-      '--json',
-      '--full-auto',
-    ];
+  if (resumeSessionId && !skipResume) {
+    args = ['exec', 'resume', ...flags, resumeSessionId, prompt];
   } else {
-    // Fresh: codex exec "<prompt>" --json --full-auto
-    args = [
-      'exec', prompt,
-      '--json',
-      '--full-auto',
-    ];
-  }
-
-  if (model) {
-    args.push('--model', model);
+    for (const dir of additionalWritableDirs) {
+      if (dir) flags.push('--add-dir', dir);
+    }
+    args = ['exec', ...flags, prompt];
   }
 
   return {

@@ -9,7 +9,7 @@ The system splits work into two phases:
 1. Council phase (expensive models): produce an execution plan.
 2. Execution phase (cheap model): apply the plan with minimal interpretation.
 
-The council is now **artifact-first**:
+The council is **artifact-first**:
 - Reasoning is exchanged via `.md` files.
 - Deterministic control signals are exchanged via `.json` files.
 - No semantic in-memory handoff between council members.
@@ -22,6 +22,10 @@ Each round follows:
 3. Agreement writes `rounds/round-N/agreement.md` and `rounds/round-N/control.json`
 4. Evaluator writes `rounds/round-N/evaluation.md` and updates `control.json`
 
+Contract files:
+- `rounds/round-N/agreement-contract.json`
+- `rounds/round-N/evaluation-contract.json`
+
 Shared files (cross-round state):
 - `context/ticket-context.md`
 - `context/roles.md`
@@ -32,6 +36,19 @@ Shared files (cross-round state):
 - `shared/protocol.md`
 
 Only JSON is used for deterministic control (e.g. `nextAction`, agreement decision, evaluation verdict).
+
+## Cheatsheet Rules
+
+- Proposer must emit a complete, executor-ready cheatsheet between:
+  - `=== CHEATSHEET START ===`
+  - `=== CHEATSHEET END ===`
+- Evaluator approval does not need to re-emit cheatsheet; extraction can reuse proposer output markers.
+- Evaluation input combines proposer + agreement artifacts so actionable content is preserved.
+
+## Provider Behavior
+
+- Codex runs with additional writable artifact dirs when needed.
+- Because Codex `exec resume` does not support `--add-dir`, council runs may start fresh Codex sessions instead of resuming when extra writable dirs are required.
 
 ## Project Structure
 

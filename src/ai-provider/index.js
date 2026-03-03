@@ -65,6 +65,7 @@ export async function runAI(options) {
       ...providerConfig,
       allowedTools: providerConfig.allowedTools || modeConfig.allowedTools || null,
       ...(resumeSessionId && { resumeSessionId }),
+      ...(artifactDir && { additionalWritableDirs: [artifactDir] }),
     };
 
     log(`[${label}] runAI: mode=${mode}, direct provider=${providerName}, model=${effectiveConfig.model || 'default'}${resumeSessionId ? `, resume=${resumeSessionId.substring(0, 8)}...` : ''}`);

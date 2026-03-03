@@ -10,7 +10,7 @@ import { isGarbageOutput } from '../../ai-provider/provider.js';
 import { runAgent } from '../runtime/runner.js';
 import { appendHumanFeedback } from '../utils/feedback.js';
 import { updateStatus } from '../runtime/workspace.js';
-import { appendText, writeText } from '../runtime/files.js';
+import { appendText, readText, writeText } from '../runtime/files.js';
 import { log, warn } from '../../utils/logger.js';
 
 const stageSuccess = (reason, data = {}) => ({ ok: true, reason, data });
@@ -33,7 +33,9 @@ export async function runProposerStage({ round, workspace, label, maxRounds, pro
   if (result.failed) return stageFailure('proposer_failed');
 
   if (isGarbageOutput(result.output)) warn(`Proposer round ${round} produced garbage output`);
-  writeText(artifacts.round.proposer, result.output);
+  // Preserve agent-written artifact; fall back to stdout capture if empty.
+  const existing = readText(artifacts.round.proposer, '');
+  if (!existing.trim()) writeText(artifacts.round.proposer, result.output);
   appendDecisionLog(artifacts.shared, round, `Proposal written to \`${artifacts.round.proposer}\`.`);
   return stageSuccess('proposal_ready', { proposalPath: artifacts.round.proposer });
 }

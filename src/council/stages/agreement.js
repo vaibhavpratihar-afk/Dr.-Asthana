@@ -13,7 +13,7 @@ import { runAgent } from '../runtime/runner.js';
 import { buildAgreementContractPrompt, readAgreementContract } from '../contract/index.js';
 import { appendHumanFeedback } from '../utils/feedback.js';
 import { updateStatus } from '../runtime/workspace.js';
-import { appendText, writeJson, writeText } from '../runtime/files.js';
+import { appendText, readText, writeJson, writeText } from '../runtime/files.js';
 import { log, warn } from '../../utils/logger.js';
 
 const AGREED = 'AGREED';
@@ -25,24 +25,15 @@ const roundMeta = (round, maxRounds, artifacts) => ({ round, maxRounds, roundsLe
 
 const appendDecisionLog = (shared, round, body) => appendText(shared.decisions, `\n## Round ${round} - agreement\n\n${body}\n`);
 
-const resolveContractPaths = ({ workspace, workingDir, label, round }) => ({
-  workspaceContractPath: workspace ? path.join(workspace, `rounds/round-${round}/agreement-contract.json`) : null,
-  contractPath: path.join(workingDir || process.cwd(), 'council-contracts', label, `round-${round}`, 'agreement-contract.json'),
-});
+const resolveContractPath = ({ workspace, round }) =>
+  path.join(workspace, `rounds/round-${round}/agreement-contract.json`);
 
-const resetContract = ({ workspaceContractPath, contractPath }) => {
-  if (contractPath) try { fs.unlinkSync(contractPath); } catch { /* ignore */ }
-  if (workspaceContractPath) try { fs.unlinkSync(workspaceContractPath); } catch { /* ignore */ }
+const resetContract = (contractPath) => {
+  try { fs.unlinkSync(contractPath); } catch { /* ignore */ }
 };
 
-const copyContract = ({ workspaceContractPath, contractPath }) => {
-  if (!workspaceContractPath || !contractPath || !fs.existsSync(contractPath)) return;
-  try { fs.copyFileSync(contractPath, workspaceContractPath); } catch { /* ignore */ }
-};
-
-const readDecision = ({ output, contractPaths, round }) => {
-  copyContract(contractPaths);
-  const parsed = readAgreementContract(contractPaths.contractPath);
+const readDecision = ({ output, contractPath, round }) => {
+  const parsed = readAgreementContract(contractPath);
   if (parsed.valid) {
     log(`[Round ${round}] Agreement via contract: ${parsed.decision}`);
     return parsed.decision;
@@ -53,14 +44,14 @@ const readDecision = ({ output, contractPaths, round }) => {
 
 export async function runAgreementStage({ round, workspace, label, maxRounds, prompts, baseContext, roles, agentOpts, sessions, artifacts }) {
   updateStatus(workspace, label, maxRounds, round, 'agreement');
-  const contractPaths = resolveContractPaths({ workspace, workingDir: agentOpts.workingDir, label, round });
-  resetContract(contractPaths);
-  fs.mkdirSync(path.dirname(contractPaths.contractPath), { recursive: true });
+  const contractPath = resolveContractPath({ workspace, round });
+  resetContract(contractPath);
+  fs.mkdirSync(path.dirname(contractPath), { recursive: true });
 
   const prompt = `${appendHumanFeedback(
     prompts.buildAgreement(baseContext, '', [], roles.agreement, roundMeta(round, maxRounds, artifacts)),
     workspace,
-  )}${buildAgreementContractPrompt(contractPaths.contractPath)}`;
+  )}${buildAgreementContractPrompt(contractPath)}`;
 
   const agents = agentOpts.agents.map((agent, index) => (index === 0 ? { ...agent, allowedTools: addWriteTool(agent.allowedTools) } : agent));
   log(`[Round ${round}] Running agreement check...${sessions.has(0) ? ' (resuming proposer session)' : ''}`);
@@ -69,9 +60,11 @@ export async function runAgreementStage({ round, workspace, label, maxRounds, pr
   if (result.failed) return stageFailure('agreement_failed');
 
   if (isGarbageOutput(result.output)) warn(`Agreement round ${round} produced garbage output`);
-  const decision = readDecision({ output: result.output, contractPaths, round });
+  const decision = readDecision({ output: result.output, contractPath, round });
   const nextAction = decision === AGREED ? 'evaluate' : 'next_round';
-  writeText(artifacts.round.agreement, `${decision}\n\n${result.output}`);
+  // Preserve agent-written artifact; fall back to stdout capture if empty.
+  const existing = readText(artifacts.round.agreement, '');
+  if (!existing.trim()) writeText(artifacts.round.agreement, `${decision}\n\n${result.output}`);
   writeJson(artifacts.round.control, { round, agreementDecision: decision, nextAction });
   appendDecisionLog(artifacts.shared, round, `Decision: ${decision}. Next action: ${nextAction}.`);
   return stageSuccess('agreement_recorded', { decision, nextAction });
