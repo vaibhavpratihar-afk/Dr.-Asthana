@@ -52,18 +52,6 @@ export function initWorkspace(checkpointDir, label, maxRounds) {
 }
 
 /**
- * Write a round file to the structured workspace.
- * All agent discussions are persisted here for visibility.
- */
-export function writeRoundFile(workspace, round, filename, content) {
-  if (!workspace) return;
-  tryWorkspaceOp(() => {
-    const filePath = writeWorkspaceFile(workspace, `round-${round}/${filename}`, content);
-    debug(`Wrote council file ${filePath}`);
-  });
-}
-
-/**
  * Overwrite status.md with the current council state.
  */
 export function updateStatus(workspace, label, maxRounds, round, phase, extra = {}) {

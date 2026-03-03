@@ -2,7 +2,7 @@
  * Evaluation Stage - final round gate recorded as markdown + deterministic JSON.
  *
  * Responsibility:
- * - Evaluate agreement artifact.
+ * - Evaluate round artifacts.
  * - Persist evaluation feedback for next rounds.
  */
 
@@ -18,10 +18,10 @@ export async function runEvaluationStage({ round, maxRounds, workspace, label, e
   const forceEval = isLastRound && (evalOpts.forceOnLastRound !== false);
   updateStatus(workspace, label, maxRounds, round, 'evaluating');
 
-  // Include proposer plan (has actionable content) alongside agreement decision.
+  // Include proposer + critic outputs; agreement stage has been removed.
   const proposerOutput = readText(artifacts.round.proposer, '');
-  const agreementOutput = readText(artifacts.round.agreement, '');
-  const debateOutput = [proposerOutput, agreementOutput].filter(Boolean).join('\n\n---\n\n');
+  const criticOutputs = (artifacts.round.critics || []).map((file) => readText(file, '')).filter(Boolean);
+  const debateOutput = [proposerOutput, ...criticOutputs].filter(Boolean).join('\n\n---\n\n');
   log(`[Round ${round}] Evaluating council output${forceEval ? ' (forced, last round)' : ''}...`);
   const evaluation = await evaluate(debateOutput, { ...evalOpts, round }, forceEval);
   const control = readJson(artifacts.round.control, {});

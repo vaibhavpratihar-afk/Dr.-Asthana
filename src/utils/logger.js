@@ -224,11 +224,3 @@ export function debug(...args) {
   console.log(...formatConsole(COLORS.gray, '[DEBUG]', ...args));
   writeToFile('DEBUG', message);
 }
-
-export function logData(label, data) {
-  const dataStr = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
-  console.log(`${COLORS.cyan}${COLORS.bold}[DATA]${COLORS.reset} ${COLORS.cyan}${label}:${COLORS.reset}`);
-  const indented = dataStr.split('\n').map(l => `  ${COLORS.dim}${l}${COLORS.reset}`).join('\n');
-  console.log(indented);
-  writeToFile('DATA', `${label}: ${dataStr}`);
-}

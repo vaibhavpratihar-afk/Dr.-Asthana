@@ -3,7 +3,7 @@
  *
  * Responsibility:
  * - Run critics in order.
- * - Persist each critic markdown file for agreement/evaluator consumption.
+ * - Persist each critic markdown file for evaluator consumption.
  */
 
 import { isGarbageOutput } from '../../ai-provider/provider.js';
@@ -18,7 +18,7 @@ const roundMeta = (round, maxRounds, artifacts) => ({ round, maxRounds, roundsLe
 
 const appendDecisionLog = (shared, round, body) => appendText(shared.decisions, `\n## Round ${round} - critics\n\n${body}\n`);
 
-export async function runCriticsStage({ round, workspace, label, maxRounds, prompts, baseContext, roles, agentOpts, sessions, agents, artifacts }) {
+export async function runCriticsStage({ round, workspace, label, maxRounds, prompts, baseContext, roles, agentOpts, agents, artifacts }) {
   let skipped = 0;
   const written = [];
 
@@ -30,7 +30,7 @@ export async function runCriticsStage({ round, workspace, label, maxRounds, prom
       workspace,
     );
 
-    log(`[Round ${round}] Running Critic ${ci} (agent-${ci})...${sessions.has(ci) ? ' (resuming session)' : ''}`);
+    log(`[Round ${round}] Running Critic ${ci} (agent-${ci})...`);
     const result = await runAgent({ prompt, label: `council-r${round}-agent-${ci}`, agentIndex: ci, ...agentOpts });
     if (result.failed || result.rateLimited || isGarbageOutput(result.output)) {
       warn(`Critic ${ci} round ${round} ${result.rateLimited ? 'rate limited' : result.failed ? 'failed' : 'produced garbage output'}, skipping`);

@@ -1,5 +1,5 @@
 /**
- * Council Prompt Builders - file-protocol prompts for proposer/critic/agreement.
+ * Council Prompt Builders - file-protocol prompts for proposer/critic.
  *
  * Responsibility:
  * - Build stage prompts that reference shared artifact paths.
@@ -11,7 +11,6 @@
  */
 
 import fs from 'fs';
-import { DEFAULT_AGREEMENT_ROLE } from '../council/config/defaults.js';
 import { getPersona, renderPersonaTemplate } from '../personas/index.js';
 
 const roundMode = (roundMeta = {}) => ((roundMeta.round || 1) <= 2 ? 'DISCOVERY' : 'CLOSURE');
@@ -78,7 +77,6 @@ const artifactSections = (roundMeta = {}, stage) => {
   const roundReads = [
     artifacts?.round?.proposer,
     ...(artifacts?.round?.critics || []),
-    artifacts?.round?.agreement,
     artifacts?.round?.evaluation,
   ].filter(existsOnDisk);
 
@@ -87,7 +85,6 @@ const artifactSections = (roundMeta = {}, stage) => {
   const writesByStage = {
     proposer: [artifacts?.round?.proposer, artifacts?.shared?.scopeLock, artifacts?.shared?.decisions],
     critic: [artifacts?.round?.criticCurrent, artifacts?.shared?.blockers, artifacts?.shared?.decisions],
-    agreement: [artifacts?.round?.agreement, artifacts?.round?.control, artifacts?.shared?.decisions],
   };
 
   return `${buildArtifactBlock('Required Reads', reads)}\n\n${buildArtifactBlock('Writable Artifacts', writesByStage[stage] || [])}\nYour main response will be captured and saved by the orchestrator. You may also write directly to shared artifacts (blockers, decisions, scope-lock) to update them.`;
@@ -135,20 +132,4 @@ export function buildCriticPrompt(round, baseContext, proposerOutput, criticOutp
   return round === 1
     ? renderPersonaTemplate('councilCriticRound1Template', vars)
     : renderPersonaTemplate('councilCriticRoundNTemplate', vars);
-}
-
-export function buildAgreementPrompt(baseContext, proposerOutput, criticOutputs, agreementRole, roundMeta) {
-  const budget = buildRoundBudgetHeader(roundMeta);
-  const protocol = buildProtocolHeader(roundMeta);
-  const artifacts = artifactSections(roundMeta, 'agreement');
-  const role = getPersona('councilAgreementArbiter') || agreementRole || DEFAULT_AGREEMENT_ROLE;
-  return renderPersonaTemplate('councilAgreementTemplate', {
-    BASE_CONTEXT: baseContext,
-    BUDGET_HEADER: budget,
-    PROTOCOL_HEADER: `${protocol}\n\n${artifacts}`,
-    PROPOSER_OUTPUT: 'Use this round proposer artifact and shared blocker ledger as truth.',
-    CRITIC_COUNT: 0,
-    CRITIQUE_SUMMARY: 'Use this round critic artifacts and blockers ledger for closure table.',
-    AGREEMENT_ROLE: role,
-  });
 }

@@ -1,9 +1,8 @@
 /**
- * Agent Runner - resilient runAI wrapper with per-agent session memory.
+ * Agent Runner - resilient runAI wrapper.
  *
  * Responsibility:
  * - Execute one agent call with provider config and logging metadata.
- * - Persist session IDs so later rounds resume the same conversation.
  *
  * Contract:
  * - Never throws; always returns { output, rateLimited, failed }.
@@ -21,8 +20,8 @@ const toAgentResult = (result) => ({
 const toFailedAgentResult = () => ({ output: '', rateLimited: false, failed: true });
 
 /**
- * Run a single council agent (proposer, critic, or agreement phase)
- * with session memory and error handling.
+ * Run a single council agent (proposer or critic phase)
+ * with error handling.
  *
  * @param {object} opts
  * @param {string} opts.prompt - The prompt to send
@@ -30,12 +29,11 @@ const toFailedAgentResult = () => ({ output: '', rateLimited: false, failed: tru
  * @param {string} opts.label - Log label for this call
  * @param {number} opts.agentIndex - Index in the agents array
  * @param {object[]} opts.agents - Resolved agent configs
- * @param {Map} opts.sessions - Session ID map (agent index → session ID) for memory
  * @param {object} opts.config - Full config object
  * @param {string} opts.councilLabel - Council label for log filenames
  * @returns {Promise<{output: string, rateLimited: boolean, failed: boolean}>}
  */
-export async function runAgent({ prompt, workingDir, label, agentIndex, agents, sessions, config, councilLabel }) {
+export async function runAgent({ prompt, workingDir, label, agentIndex, agents, config, councilLabel }) {
   try {
     const result = await runAI({
       prompt,
@@ -46,13 +44,7 @@ export async function runAgent({ prompt, workingDir, label, agentIndex, agents, 
       ticketKey: councilLabel,
       config,
       providerConfig: agents[agentIndex],
-      resumeSessionId: sessions.get(agentIndex) || undefined,
     });
-
-    // Persist session ID for memory across rounds
-    if (result.sessionId) {
-      sessions.set(agentIndex, result.sessionId);
-    }
 
     return toAgentResult(result);
   } catch (err) {

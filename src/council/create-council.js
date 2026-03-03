@@ -20,7 +20,6 @@ const REQUIRED_PATHS = Object.freeze([
   'roles.critic',
   'prompts.buildProposer',
   'prompts.buildCritic',
-  'prompts.buildAgreement',
   'evaluation.buildAiPrompt',
   'evaluation.outputMarkers',
   'config',
@@ -33,18 +32,16 @@ const REQUIRED_PATHS = Object.freeze([
  * @param {string} opts.goal - What the council should achieve
  * @param {string} opts.context - All context the agents need
  * @param {string} opts.workingDir - Working directory for tool access
- * @param {{proposer: string, critic: string, agreement?: string}} opts.roles - Role instructions
+ * @param {{proposer: string, critic: string}} opts.roles - Role instructions
  * @param {object} opts.prompts - Prompt builder functions (owned by caller)
  * @param {function} opts.prompts.buildProposer - (round, baseContext, proposerOutput, criticOutputs, role, feedback) => string
  * @param {function} opts.prompts.buildCritic - (round, baseContext, proposerOutput, criticOutputs, criticIndex, role) => string
- * @param {function} opts.prompts.buildAgreement - (baseContext, proposerOutput, criticOutputs, agreementRole) => string
  * @param {object} opts.evaluation - Evaluation configuration
  * @param {function} [opts.evaluation.structural] - (output) => {passed, feedback}
  * @param {function} opts.evaluation.buildAiPrompt - (councilOutput, context, force) => prompt
  * @param {{start: string, end: string}} opts.evaluation.outputMarkers - Extraction markers
  * @param {string} [opts.evaluation.approvalKeyword] - Default: 'APPROVED'
  * @param {string} [opts.evaluation.rejectionKeyword] - Default: 'REJECTED'
- * @param {string} [opts.evaluation.feedbackMarker] - Default: '=== FEEDBACK ==='
  * @param {boolean} [opts.evaluation.forceOnLastRound] - Default: true
  * @param {object} opts.config - Full config object (aiProvider section used)
  * @param {string} opts.label - Label for logs and workspace files

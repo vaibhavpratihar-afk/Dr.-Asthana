@@ -10,15 +10,8 @@
  * - defaultStructuralCheck returns { passed, feedback } only.
  */
 
-export const DEFAULT_AGREEMENT_ROLE =
-  'Review all critique(s) carefully. For each issue raised by critics, explain with evidence whether it is valid or invalid.\n\n' +
-  'Use AGREED only if all valid critiques are already addressed without changing the plan.\n\n' +
-  'Use DISAGREE if any valid critique requires plan changes. If DISAGREE, return a complete revised plan.\n\n' +
-  'Your response must start with AGREED or DISAGREE on the first line.';
-
 export const DEFAULT_APPROVAL_KEYWORD = 'APPROVED';
 export const DEFAULT_REJECTION_KEYWORD = 'REJECTED';
-export const DEFAULT_FEEDBACK_MARKER = '=== FEEDBACK ===';
 
 /**
  * Default structural pre-check: minimum length, file paths, action verbs.

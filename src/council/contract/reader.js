@@ -2,7 +2,7 @@
  * Contract Reader - strict parser/validator for on-disk agent contracts.
  *
  * Responsibility:
- * - Read agreement/evaluation JSON files and validate allowed values.
+ * - Read evaluation JSON files and validate allowed values.
  *
  * Contract:
  * - Never throws to caller for malformed/missing files.
@@ -11,27 +11,6 @@
 
 import fs from 'fs';
 import { warn, debug } from '../../utils/logger.js';
-
-const AGREEMENT_DECISIONS = new Set(['AGREED', 'DISAGREE']);
-
-/**
- * Read and validate an agreement contract file.
- *
- * Expected shape: { "decision": "AGREED" | "DISAGREE", "reasoning"?: string }
- *
- * @param {string} contractPath - Absolute path to agreement-contract.json
- * @returns {{ valid: boolean, decision?: string, reasoning?: string, reason?: string }}
- */
-export function readAgreementContract(contractPath) {
-  const raw = readJsonFile(contractPath);
-  if (!raw.valid) return raw;
-
-  const decision = normalizeUpperString(raw.data.decision);
-  if (!decision || !AGREEMENT_DECISIONS.has(decision)) return invalidDecision(raw.data.decision);
-
-  debug(`Agreement contract read: decision=${decision}`);
-  return { valid: true, decision, reasoning: raw.data.reasoning || null };
-}
 
 /**
  * Read and validate an evaluation contract file.
@@ -83,7 +62,6 @@ const readJsonFile = (filePath) => {
 };
 
 const normalizeUpperString = (value) => (typeof value === 'string' ? value.toUpperCase() : null);
-const invalidDecision = (decision) => ({ valid: false, reason: `Invalid decision value: ${JSON.stringify(decision)}` });
 const invalidVerdict = (verdict, approvalKeyword, rejectionKeyword) => ({
   valid: false,
   reason: `Verdict "${verdict}" does not match ${approvalKeyword} or ${rejectionKeyword}`,

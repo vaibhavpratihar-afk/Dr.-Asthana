@@ -12,7 +12,7 @@ Read shared artifacts before writing:
 - `shared/blockers.md`
 - `shared/decisions.md`
 - `shared/evaluator-feedback.md`
-- current round proposer/critic/agreement artifacts
+- current round proposer/critic artifacts
 
 ## Required Behavior
 - Keep scope aligned with ticket and comments.

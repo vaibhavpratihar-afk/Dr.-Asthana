@@ -2,7 +2,7 @@
  * Council Orchestrator - file-backed facade with markdown/json state transfer.
  *
  * Responsibility:
- * - Run proposer -> critics -> agreement -> evaluation pipeline per round.
+ * - Run proposer -> critics -> evaluation pipeline per round.
  * - Use shared artifacts as the only cross-member state channel.
  */
 
@@ -12,14 +12,12 @@ import path from 'path';
 import { resolveAgents } from '../config/agents.js';
 import { initWorkspace, updateStatus } from '../runtime/workspace.js';
 import { initArtifacts, roundArtifacts } from '../runtime/artifacts.js';
-import { readJson, readText } from '../runtime/files.js';
+import { readText } from '../runtime/files.js';
 import { runProposerStage } from '../stages/proposer.js';
 import { runCriticsStage } from '../stages/critics.js';
-import { runAgreementStage } from '../stages/agreement.js';
 import { runEvaluationStage } from '../stages/evaluation.js';
 import { log } from '../../utils/logger.js';
 
-const DEFAULT_POLICY = Object.freeze({ failClosed: true, forceBestEffortOnMaxRounds: false });
 const withWriteTool = (allowedTools) => (!allowedTools ? 'Read,Write,Glob,Grep' : (allowedTools.includes('Write') ? allowedTools : `${allowedTools},Write`));
 
 const readPolicy = (councilConfig = {}) => ({
@@ -30,11 +28,9 @@ const readPolicy = (councilConfig = {}) => ({
 const buildFailure = (rounds) => ({ passed: false, output: null, feedback: 'Council failed to produce acceptable output', rounds });
 
 const buildRuntime = ({ evaluation, context, config, label, workspace, workingDir, agents }) => {
-  const sessions = new Map();
   return {
-    sessions,
     agentsWithWrite: agents.map((agent) => ({ ...agent, allowedTools: withWriteTool(agent.allowedTools) })),
-    agentOpts: { agents, sessions, config, councilLabel: label, workingDir },
+    agentOpts: { agents, config, councilLabel: label, workingDir },
     evalOpts: { ...evaluation, context, config, label, workspace, workingDir },
   };
 };
@@ -53,7 +49,6 @@ const runRound = async ({ round, maxRounds, label, workspace, baseContext, roles
     prompts,
     baseContext,
     roles,
-    sessions: runtime.sessions,
     artifacts,
   };
 
@@ -62,12 +57,6 @@ const runRound = async ({ round, maxRounds, label, workspace, baseContext, roles
 
   const critics = await runCriticsStage({ ...stageBase, agents: runtime.agentsWithWrite, agentOpts: { ...runtime.agentOpts, agents: runtime.agentsWithWrite } });
   if (!critics.ok) return { done: true, passed: false, reason: critics.reason };
-
-  const agreement = await runAgreementStage({ ...stageBase, agentOpts: { ...runtime.agentOpts, agents: runtime.agentsWithWrite } });
-  if (!agreement.ok) return { done: true, passed: false, reason: agreement.reason };
-
-  const agreementControl = readJson(artifacts.round.control, {});
-  if (agreementControl.nextAction === 'next_round') return { done: false, passed: false, reason: 'agreement_disagreed' };
 
   const evaluation = await runEvaluationStage({
     round,
@@ -87,8 +76,8 @@ const runRound = async ({ round, maxRounds, label, workspace, baseContext, roles
 
 const forceBestEffort = async ({ policy, artifacts, runtime, label, workspace, maxRounds }) => {
   if (!policy.forceBestEffortOnMaxRounds) return null;
-  const lastAgreementPath = roundArtifacts(artifacts, maxRounds, Math.max(runtime.agentsWithWrite.length - 1, 0)).files.agreement;
-  const fallbackSource = readText(lastAgreementPath, '');
+  const lastProposerPath = roundArtifacts(artifacts, maxRounds, Math.max(runtime.agentsWithWrite.length - 1, 0)).files.proposer;
+  const fallbackSource = readText(lastProposerPath, '');
   if (!fallbackSource.trim()) return null;
   const forceResult = await evaluate(fallbackSource, runtime.evalOpts, true);
   if (!forceResult.output) return null;

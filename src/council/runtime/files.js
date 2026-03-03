@@ -14,7 +14,7 @@ import fs from 'fs';
 import path from 'path';
 
 const ensureDir = (filePath) => fs.mkdirSync(path.dirname(filePath), { recursive: true });
-export const fileExists = (filePath) => fs.existsSync(filePath);
+const fileExists = (filePath) => fs.existsSync(filePath);
 export const readText = (filePath, fallback = '') => (fileExists(filePath) ? fs.readFileSync(filePath, 'utf8') : fallback);
 export const writeText = (filePath, content) => (ensureDir(filePath), fs.writeFileSync(filePath, content), filePath);
 export const appendText = (filePath, content) => (ensureDir(filePath), fs.appendFileSync(filePath, content), filePath);

@@ -8,7 +8,6 @@
  * - Cheatsheet step completeness (test files, completion ratio)
  * - Broken imports from removed lines
  *
- * Also provides structural diff review (reviewDiff) for pre-SHIP checks.
  */
 
 import { execSync } from 'child_process';
@@ -293,7 +292,7 @@ export async function validateExecution(cheatsheet, cloneDir) {
 
   // Check 5: Broken imports
   const importWarnings = checkBrokenImports(cloneDir, changedFiles);
-  warnings.push(...importWarnings);
+  critical.push(...importWarnings);
 
   const issues = [...critical, ...warnings];
 
@@ -310,97 +309,4 @@ export async function validateExecution(cheatsheet, cloneDir) {
     critical,
     warnings,
   };
-}
-
-/**
- * Structural diff review — purely structural, no AI call.
- * Run between VALIDATE and SHIP to catch issues before committing.
- *
- * @param {string} cloneDir - Path to the cloned repo
- * @returns {Promise<{warnings: string[]}>}
- */
-export async function reviewDiff(cloneDir) {
-  const warnings = [];
-
-  let diff;
-  try {
-    diff = execSync('git diff HEAD', {
-      cwd: cloneDir,
-      encoding: 'utf-8',
-      stdio: 'pipe',
-      timeout: 30000,
-    });
-  } catch {
-    // Try staged diff
-    try {
-      diff = execSync('git diff --cached', {
-        cwd: cloneDir,
-        encoding: 'utf-8',
-        stdio: 'pipe',
-        timeout: 30000,
-      });
-    } catch {
-      return { warnings };
-    }
-  }
-
-  if (!diff) return { warnings };
-
-  // Parse diff per file
-  const fileDiffs = diff.split(/^diff --git /m).filter(Boolean);
-
-  for (const fileDiff of fileDiffs) {
-    const fileMatch = fileDiff.match(/^a\/(.+?) b\//);
-    if (!fileMatch) continue;
-    const filePath = fileMatch[1];
-
-    const addedLines = fileDiff.split('\n')
-      .filter(l => l.startsWith('+') && !l.startsWith('+++'));
-
-    // Check for TODO/FIXME/HACK in added lines
-    for (const line of addedLines) {
-      if (/\b(TODO|FIXME|HACK)\b/.test(line)) {
-        warnings.push(`${filePath}: added line contains ${line.match(/\b(TODO|FIXME|HACK)\b/)[1]}: ${line.substring(1, 100).trim()}`);
-      }
-    }
-
-    // JSON validity check for .json files
-    if (filePath.endsWith('.json')) {
-      try {
-        const fullPath = path.join(cloneDir, filePath);
-        if (fs.existsSync(fullPath)) {
-          const content = fs.readFileSync(fullPath, 'utf-8');
-          JSON.parse(content);
-        }
-      } catch (e) {
-        warnings.push(`${filePath}: invalid JSON — ${e.message}`);
-      }
-    }
-  }
-
-  // Check broken imports across all changed JS/TS files
-  let changedFiles = [];
-  try {
-    const nameOnly = execSync('git diff --name-only', {
-      cwd: cloneDir, encoding: 'utf-8', stdio: 'pipe', timeout: 10000,
-    }).trim();
-    const cached = execSync('git diff --cached --name-only', {
-      cwd: cloneDir, encoding: 'utf-8', stdio: 'pipe', timeout: 10000,
-    }).trim();
-    changedFiles = [...new Set([
-      ...nameOnly.split('\n').filter(Boolean),
-      ...cached.split('\n').filter(Boolean),
-    ])];
-  } catch { /* ignore */ }
-
-  const importWarnings = checkBrokenImports(cloneDir, changedFiles);
-  warnings.push(...importWarnings);
-
-  if (warnings.length > 0) {
-    warn(`Diff review found ${warnings.length} warning(s)`);
-  } else {
-    debug('Diff review passed — no warnings');
-  }
-
-  return { warnings };
 }

@@ -13,10 +13,9 @@
 import path from 'path';
 import { writeText } from './files.js';
 
-const nowIso = () => new Date().toISOString();
 
 const contextTemplate = ({ goal, context }) => `# Ticket Context\n\n${context}\n\n## Goal\n\n${goal}\n`;
-const rolesTemplate = (roles) => `# Council Roles\n\n## Proposer\n${roles.proposer || ''}\n\n## Critic\n${roles.critic || ''}\n\n## Agreement\n${roles.agreement || ''}\n`;
+const rolesTemplate = (roles) => `# Council Roles\n\n## Proposer\n${roles.proposer || ''}\n\n## Critic\n${roles.critic || ''}\n`;
 const scopeTemplate = () => '# Scope Lock\n\nFill this with explicit in-scope and out-of-scope notes.\n';
 const blockersTemplate = () => '# Blockers Ledger\n\n| ID | Status | Evidence | Owner |\n|---|---|---|---|\n';
 const decisionsTemplate = () => '# Decisions\n\n';
@@ -54,12 +53,9 @@ export function roundArtifacts(artifacts, round, criticCount) {
   const roundDir = path.join(artifacts.roundsDir, `round-${round}`);
   const files = {
     proposer: path.join(roundDir, 'proposer.md'),
-    agreement: path.join(roundDir, 'agreement.md'),
     evaluation: path.join(roundDir, 'evaluation.md'),
     control: path.join(roundDir, 'control.json'),
     critics: Array.from({ length: criticCount }, (_, index) => path.join(roundDir, `critic-${index + 1}.md`)),
   };
   return { round, roundDir, files };
 }
-
-export const appendDecisionEntry = (sharedFiles, round, stage, body) => `\n## Round ${round} - ${stage}\n\nTime: ${nowIso()}\n\n${body}\n`;

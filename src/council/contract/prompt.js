@@ -13,32 +13,6 @@ const joinLines = (lines) => lines.join('\n');
 const fencedJson = (json) => ['```json', json, '```'];
 
 /**
- * Build instructions for the agreement contract.
- *
- * @param {string} contractPath - Absolute path where agent should write the JSON
- * @returns {string} Instruction block to append to the agreement prompt
- */
-export function buildAgreementContractPrompt(contractPath) {
-  return joinLines([
-    '',
-    '## Required: Write Decision Contract',
-    '',
-    'After your analysis, you MUST use the Write tool to create the following JSON file.',
-    'This is how the system reads your decision — your markdown text is for discussion only.',
-    '',
-    `**File path:** \`${contractPath}\``,
-    '',
-    'If you AGREE (your existing plan already covers all valid critiques without changes):',
-    ...fencedJson('{"decision": "AGREED"}'),
-    '',
-    'If you DISAGREE (at least one critique requires plan changes):',
-    ...fencedJson('{"decision": "DISAGREE", "reasoning": "brief explanation of what changed"}'),
-    '',
-    'Write this file BEFORE your final response. The decision field must be exactly "AGREED" or "DISAGREE".',
-  ]);
-}
-
-/**
  * Build instructions for the evaluation contract.
  *
  * @param {string} contractPath - Absolute path where evaluator should write the JSON

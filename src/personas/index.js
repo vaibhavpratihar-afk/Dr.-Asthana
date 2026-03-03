@@ -10,8 +10,6 @@ const PERSONA_PATHS = Object.freeze({
   councilCritic: path.join(__dirname, 'council', 'critic.persona.md'),
   councilCriticDiscovery: path.join(__dirname, 'council', 'critic.discovery.persona.md'),
   councilCriticClosure: path.join(__dirname, 'council', 'critic.closure.persona.md'),
-  councilAgreement: path.join(__dirname, 'council', 'agreement.persona.md'),
-  councilAgreementArbiter: path.join(__dirname, 'council', 'agreement.arbiter.persona.md'),
   councilEvaluator: path.join(__dirname, 'council', 'evaluator.persona.md'),
   councilEvaluatorClosure: path.join(__dirname, 'council', 'evaluator.closure.persona.md'),
   councilProtocolManager: path.join(__dirname, 'council', 'protocol-manager.persona.md'),
@@ -21,10 +19,6 @@ const PERSONA_PATHS = Object.freeze({
   councilProposerRoundNTemplate: path.join(__dirname, 'council', 'templates', 'proposer.roundN.prompt.md'),
   councilCriticRound1Template: path.join(__dirname, 'council', 'templates', 'critic.round1.prompt.md'),
   councilCriticRoundNTemplate: path.join(__dirname, 'council', 'templates', 'critic.roundN.prompt.md'),
-  councilAgreementTemplate: path.join(__dirname, 'council', 'templates', 'agreement.prompt.md'),
-  reviewProposer: path.join(__dirname, 'review', 'proposer.persona.md'),
-  reviewCritic: path.join(__dirname, 'review', 'critic.persona.md'),
-  reviewEvaluatorTemplate: path.join(__dirname, 'review', 'evaluator.prompt.md'),
   executorPrompt: path.join(__dirname, 'executor.prompt.md'),
 });
 

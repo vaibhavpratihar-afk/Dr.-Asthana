@@ -79,7 +79,6 @@ export function loadConfig() {
       executionRetries: raw.agent?.executionRetries ?? 1,
     },
     council: buildCouncilConfig(raw),
-    prReviewCouncil: buildPrReviewCouncilConfig(raw),
     aiProvider: buildAiProviderConfig(raw),
     infra: {
       enabled: raw.infra?.enabled ?? false,
@@ -117,11 +116,6 @@ function buildCouncilConfig(raw) {
   return buildCouncilConfigSection(raw.council || {});
 }
 
-function buildPrReviewCouncilConfig(raw) {
-  if (!raw.prReviewCouncil) return null;
-  return buildCouncilConfigSection(raw.prReviewCouncil);
-}
-
 function buildCouncilConfigSection(councilRaw = {}) {
   const normalizeMember = (member, defaults) => ({
     provider: member?.provider || defaults.provider,
@@ -150,6 +144,8 @@ function buildCouncilConfigSection(councilRaw = {}) {
     : [normalizeMember(null, debateDefaults)];
   const evaluator = normalizeMember(councilRaw.evaluator, evaluateDefaults);
   return {
+    // Preserve all council-level policy knobs while normalizing members.
+    ...councilRaw,
     maxRounds: councilRaw.maxRounds || 3,
     proposer,
     critics,
@@ -201,18 +197,4 @@ export function getServiceConfig(config, serviceName) {
     }
   }
   return null;
-}
-
-/**
- * Return a shallow config clone with the requested council profile.
- *
- * Useful when a caller needs to run council logic with an alternate
- * proposer/critic/evaluator setup (e.g. PR review council).
- */
-export function withCouncilConfig(config, councilOverride) {
-  if (!councilOverride) return config;
-  return {
-    ...config,
-    council: councilOverride,
-  };
 }

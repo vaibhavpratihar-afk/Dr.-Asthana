@@ -19,7 +19,7 @@ const roundMeta = (round, maxRounds, artifacts) => ({ round, maxRounds, roundsLe
 
 const appendDecisionLog = (shared, round, body) => appendText(shared.decisions, `\n## Round ${round} - proposer\n\n${body}\n`);
 
-export async function runProposerStage({ round, workspace, label, maxRounds, prompts, baseContext, roles, initialFeedback, agentOpts, sessions, artifacts }) {
+export async function runProposerStage({ round, workspace, label, maxRounds, prompts, baseContext, roles, initialFeedback, agentOpts, artifacts }) {
   updateStatus(workspace, label, maxRounds, round, 'agent-0');
 
   const prompt = appendHumanFeedback(
@@ -27,7 +27,7 @@ export async function runProposerStage({ round, workspace, label, maxRounds, pro
     workspace,
   );
 
-  log(`[Round ${round}] Running Proposer (agent-0)...${sessions.has(0) ? ' (resuming session)' : ''}`);
+  log(`[Round ${round}] Running Proposer (agent-0)...`);
   const result = await runAgent({ prompt, label: `council-r${round}-agent-0`, agentIndex: 0, ...agentOpts });
   if (result.rateLimited) return stageFailure('proposer_rate_limited');
   if (result.failed) return stageFailure('proposer_failed');

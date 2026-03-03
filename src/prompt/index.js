@@ -9,7 +9,7 @@
 import { buildTicketContext } from './ticket-context.js';
 import { buildCodebaseContext, extractFilePaths } from './codebase-context.js';
 import { createCouncil } from '../council/index.js';
-import { buildProposerPrompt, buildCriticPrompt, buildAgreementPrompt } from './council-prompts.js';
+import { buildProposerPrompt, buildCriticPrompt } from './council-prompts.js';
 import { getPersona, buildCouncilEvaluatorPrompt } from '../personas/index.js';
 import { validateExecution } from './validator.js';
 import { log, warn } from '../utils/logger.js';
@@ -57,12 +57,10 @@ export async function buildCheatsheet(ticketData, cloneDir, config, options = {}
     roles: {
       proposer: getPersona('councilProposer'),
       critic: getPersona('councilCriticDiscovery'),
-      agreement: getPersona('councilAgreementArbiter'),
     },
     prompts: {
       buildProposer: buildProposerPrompt,
       buildCritic: buildCriticPrompt,
-      buildAgreement: buildAgreementPrompt,
     },
     evaluation: {
       buildAiPrompt: (councilOutput, ticketContext, force) => buildCouncilEvaluatorPrompt({ councilOutput, ticketContext, force, cheatsheetMarkers: CHEATSHEET_MARKERS }),
@@ -95,5 +93,4 @@ export async function buildCheatsheet(ticketData, cloneDir, config, options = {}
   };
 }
 
-export { validateExecution, reviewDiff } from './validator.js';
-export { reviewPullRequest } from './pr-review.js';
+export { validateExecution } from './validator.js';
