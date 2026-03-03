@@ -20,8 +20,7 @@ The council is file-backed.
 ### Stage Order
 1. proposer
 2. critics
-3. agreement
-4. evaluation
+3. evaluation
 
 ### Required Behavior
 - Every stage reads shared files directly.
@@ -39,7 +38,6 @@ The council is file-backed.
 
 ## Contract Files
 
-- Agreement contract: `rounds/round-N/agreement-contract.json`
 - Evaluation contract: `rounds/round-N/evaluation-contract.json`
 
 ## Shared Artifact Paths

@@ -19,11 +19,9 @@ The council is **artifact-first**:
 Each round follows:
 1. Proposer writes `rounds/round-N/proposer.md`
 2. Critics write `rounds/round-N/critic-*.md`
-3. Agreement writes `rounds/round-N/agreement.md` and `rounds/round-N/control.json`
-4. Evaluator writes `rounds/round-N/evaluation.md` and updates `control.json`
+3. Evaluator writes `rounds/round-N/evaluation.md` and updates `rounds/round-N/control.json`
 
 Contract files:
-- `rounds/round-N/agreement-contract.json`
 - `rounds/round-N/evaluation-contract.json`
 
 Shared files (cross-round state):
@@ -43,7 +41,7 @@ Only JSON is used for deterministic control (e.g. `nextAction`, agreement decisi
   - `=== CHEATSHEET START ===`
   - `=== CHEATSHEET END ===`
 - Evaluator approval does not need to re-emit cheatsheet; extraction can reuse proposer output markers.
-- Evaluation input combines proposer + agreement artifacts so actionable content is preserved.
+- Evaluation input combines proposer + critic artifacts.
 
 ## Provider Behavior
 
@@ -93,7 +91,6 @@ Important sections:
 - `agent`
 - `aiProvider`
 - `council`
-- `prReviewCouncil`
 
 ## Commands
 
