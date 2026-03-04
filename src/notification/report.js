@@ -8,8 +8,6 @@
  * All report functions return { jira: string, slack: object[]|null }
  */
 
-import { summariseText } from '../utils/summariser.js';
-import { warn } from '../utils/logger.js';
 
 /** Max chars for a single Slack Block Kit mrkdwn text field. */
 const SLACK_MRKDWN_LIMIT = 3000;
@@ -28,29 +26,12 @@ function sanitizeForSlack(text) {
 }
 
 /**
- * Safely summarise text — wraps summariseText with try-catch.
- * Falls back to hard truncation on failure.
+ * Safely truncate text to a limit.
  */
-function safeSummarise(text, opts) {
-  try {
-    return summariseText(text, opts);
-  } catch (e) {
-    warn(`Summariser failed for ${opts?.label || 'text'}: ${e.message}. Using hard truncation.`);
-    const limit = opts?.limit || 3000;
-    if (text && text.length > limit) {
-      return text.substring(0, limit - 3) + '...';
-    }
-    return text || '';
-  }
-}
-
-/**
- * Build a human-friendly 2-3 sentence summary from a cheatsheet.
- * This is NOT technical — it's for JIRA/Slack consumption by non-engineers.
- */
-function buildHumanSummary(cheatsheet, limit = 300) {
-  if (!cheatsheet) return '';
-  return safeSummarise(cheatsheet, { limit, label: 'human-summary' });
+function safeTruncate(text, limit = 3000) {
+  if (!text) return '';
+  if (text.length > limit) return text.substring(0, limit - 3) + '...';
+  return text;
 }
 
 /**
@@ -64,9 +45,8 @@ function prUrl(config, pr) {
 /**
  * Build a step report for a JIRA comment.
  */
-export function buildStepReport(stepName, details, timestamp) {
-  const time = timestamp || new Date().toISOString();
-  const jira = `**Step: ${stepName}** (${time})\n${details}`;
+export function buildStepReport(stepName, details) {
+  const jira = `**Step: ${stepName}** (${new Date().toISOString()})\n${details}`;
   return { jira, slack: null };
 }
 
@@ -74,18 +54,11 @@ export function buildStepReport(stepName, details, timestamp) {
 // Final Report (success) — JIRA + Slack
 // ─────────────────────────────────────────────────
 
-export function buildFinalReport(config, allPRs, allFailures, cheatsheetSummary, artifactUrl) {
+export function buildFinalReport(config, allPRs, allFailures, artifactUrl) {
   // --- JIRA: clean, scannable, layman-friendly ---
   const jiraLines = [];
   jiraLines.push(`### Implementation Complete`);
   jiraLines.push('');
-
-  // Plain-English summary
-  const summary = buildHumanSummary(cheatsheetSummary);
-  if (summary) {
-    jiraLines.push(summary);
-    jiraLines.push('');
-  }
 
   // PR table — simple
   if (allPRs.length > 0) {
@@ -119,19 +92,13 @@ export function buildFinalReport(config, allPRs, allFailures, cheatsheetSummary,
     text: { type: 'plain_text', text: `PR ready for review`, emoji: true },
   });
 
-  // Core message: ticket + what was done + PR link — all in one block
-  const slackSummary = buildHumanSummary(cheatsheetSummary, 200);
+  // Core message: ticket + PR links
   const slackPrLines = allPRs.map(pr =>
     `<${prUrl(config, pr)}|PR #${pr.prId}> — ${pr.service} / \`${pr.baseBranch}\``
   );
-
-  let messageText = slackPrLines.join('\n');
-  if (slackSummary) {
-    messageText += `\n\n${slackSummary}`;
-  }
   slackBlocks.push({
     type: 'section',
-    text: { type: 'mrkdwn', text: sanitizeForSlack(messageText) },
+    text: { type: 'mrkdwn', text: sanitizeForSlack(slackPrLines.join('\n')) },
   });
 
   // Failures
@@ -216,7 +183,7 @@ export function buildInProgressComment(config, ticket) {
   lines.push('');
 
   if (ticket.description && ticket.description !== 'No description provided') {
-    const brief = safeSummarise(ticket.description, { limit: 300, label: 'in-progress-desc' });
+    const brief = safeTruncate(ticket.description, 300);
     lines.push(brief);
   }
 
@@ -227,17 +194,10 @@ export function buildInProgressComment(config, ticket) {
 // Lead Review Comment (JIRA only)
 // ─────────────────────────────────────────────────
 
-export function buildLeadReviewComment(config, allPRs, cheatsheetSummary) {
+export function buildLeadReviewComment(config, allPRs) {
   const lines = [];
   lines.push('### Ready for Review');
   lines.push('');
-
-  // Human summary
-  if (cheatsheetSummary) {
-    const summary = buildHumanSummary(cheatsheetSummary, 500);
-    lines.push(summary);
-    lines.push('');
-  }
 
   // PR links
   if (allPRs.length > 0) {

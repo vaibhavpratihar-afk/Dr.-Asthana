@@ -18,8 +18,16 @@ import { warn } from '../utils/logger.js';
 
 /**
  * Post a step comment to JIRA (fire-and-forget).
+ * @param {string} ticketKey
+ * @param {string} stepName
+ * @param {string} details
+ * @param {object} [config] - If provided and config.jira.muteComments is true, skip posting.
  */
-export async function postJiraStep(ticketKey, stepName, details) {
+export async function postJiraStep(ticketKey, stepName, details, config) {
+  if (config?.jira?.muteComments) {
+    warn(`[jira] muteComments=true — skipping step comment (${stepName})`);
+    return;
+  }
   try {
     const report = buildStepReport(stepName, details);
     await postComment(ticketKey, report.jira);
@@ -31,9 +39,9 @@ export async function postJiraStep(ticketKey, stepName, details) {
 /**
  * Post the final JIRA report with PR table and summary.
  */
-export async function postFinalJiraReport(config, ticketKey, allPRs, allFailures, cheatsheetSummary, artifactUrl) {
+export async function postFinalJiraReport(config, ticketKey, allPRs, allFailures, artifactUrl) {
   try {
-    const report = buildFinalReport(config, allPRs, allFailures, cheatsheetSummary, artifactUrl);
+    const report = buildFinalReport(config, allPRs, allFailures, artifactUrl);
     await postComment(ticketKey, report.jira);
   } catch (error) {
     warn(`Failed to post final JIRA report for ${ticketKey}: ${error.message}`);
@@ -43,8 +51,8 @@ export async function postFinalJiraReport(config, ticketKey, allPRs, allFailures
 /**
  * Send Slack success notification with all PRs.
  */
-export async function notifySlackSuccess(config, ticketKey, summary, allPRs, allFailures, cheatsheetSummary, artifactUrl) {
-  const report = buildFinalReport(config, allPRs, allFailures, cheatsheetSummary, artifactUrl);
+export async function notifySlackSuccess(config, ticketKey, summary, allPRs, allFailures, artifactUrl) {
+  const report = buildFinalReport(config, allPRs, allFailures, artifactUrl);
   if (report.slack) {
     // Add ticket context to slack blocks
     const ticketBlock = {
@@ -85,9 +93,9 @@ export async function postInProgressComment(config, ticketKey, ticket) {
 /**
  * Post LEAD REVIEW JIRA comment.
  */
-export async function postLeadReviewComment(config, ticketKey, allPRs, cheatsheetSummary) {
+export async function postLeadReviewComment(config, ticketKey, allPRs) {
   try {
-    const report = buildLeadReviewComment(config, allPRs, cheatsheetSummary);
+    const report = buildLeadReviewComment(config, allPRs);
     await postComment(ticketKey, report.jira);
   } catch (error) {
     warn(`Failed to post lead review comment: ${error.message}`);

@@ -138,7 +138,7 @@ function extractTextFromADF(content) {
   return textParts.join('').trim();
 }
 
-export function extractDescription(ticket) {
+function extractDescription(ticket) {
   const description = ticket.fields?.description;
   if (!description) return 'No description provided';
   if (typeof description === 'string') return description;
@@ -148,7 +148,7 @@ export function extractDescription(ticket) {
   return 'No description provided';
 }
 
-export function extractComments(ticket) {
+function extractComments(ticket) {
   const comments = ticket.fields?.comment?.comments || [];
   return comments.map((comment) => {
     let text = '';
@@ -165,14 +165,14 @@ export function extractComments(ticket) {
   });
 }
 
-export function extractAffectedSystems(config, ticket) {
+function extractAffectedSystems(config, ticket) {
   const field = config.jira.fields.affectedSystems;
   const affectedSystems = ticket.fields?.[field];
   if (!affectedSystems || !Array.isArray(affectedSystems)) return [];
   return affectedSystems.map((s) => s.value || s.name || s).filter(Boolean);
 }
 
-export function extractBranchFromFixVersion(ticket) {
+function extractBranchFromFixVersion(ticket) {
   const fixVersions = ticket.fields?.fixVersions;
   if (!fixVersions || !Array.isArray(fixVersions) || fixVersions.length === 0) return null;
   const versionName = fixVersions[0].name || fixVersions[0];
@@ -180,7 +180,7 @@ export function extractBranchFromFixVersion(ticket) {
   return match ? `version/${match[1]}` : null;
 }
 
-export function extractAllBranches(ticket) {
+function extractAllBranches(ticket) {
   const fixVersions = ticket.fields?.fixVersions;
   if (!fixVersions || !Array.isArray(fixVersions) || fixVersions.length === 0) return [];
   return fixVersions
@@ -193,7 +193,7 @@ export function extractAllBranches(ticket) {
     .filter(Boolean);
 }
 
-export function getFixVersionName(ticket) {
+function getFixVersionName(ticket) {
   const fixVersions = ticket.fields?.fixVersions;
   if (!fixVersions || !Array.isArray(fixVersions) || fixVersions.length === 0) return null;
   return fixVersions[0].name || fixVersions[0];
@@ -212,7 +212,6 @@ export function parseTicket(config, ticket) {
     fixVersion: getFixVersionName(ticket),
     targetBranch: extractBranchFromFixVersion(ticket),
     targetBranches: extractAllBranches(ticket),
-    labels: ticket.fields?.labels || [],
   };
 }
 

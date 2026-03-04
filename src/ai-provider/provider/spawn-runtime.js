@@ -15,7 +15,7 @@ import { writePromptFile, writeLogFile } from './log-writer.js';
  *
  * @returns {Promise<{stdout: string, stderr: string, exitCode: number, duration: number}>}
  */
-export function spawnRuntime({ command, args, workingDir, timeout, label, logDir, ticketKey, provider, prompt, artifactDir, onEvent }) {
+export function spawnRuntime({ command, args, workingDir, timeout, label, logDir, ticketKey, provider, prompt, artifactDir }) {
   log(`[${label}] Spawning ${command} (timeout=${Math.round(timeout / 60000)}min)...`);
   debug(`[${label}] Working directory: ${workingDir}`);
   writePromptFile(artifactDir, label, prompt);
@@ -52,7 +52,7 @@ export function spawnRuntime({ command, args, workingDir, timeout, label, logDir
       stdoutBuffer = lines.pop() || '';
 
       for (const line of lines) {
-        const counted = processOutputLine({ line, onEvent, label, logSummaryLines });
+        const counted = processOutputLine({ line, label, logSummaryLines });
         if (counted) eventCount++;
       }
     });
@@ -75,15 +75,6 @@ export function spawnRuntime({ command, args, workingDir, timeout, label, logDir
     proc.on('close', (code) => {
       clearTimeout(timeoutId);
       clearInterval(heartbeat);
-
-      if (stdoutBuffer.trim() && onEvent) {
-        try {
-          const event = JSON.parse(stdoutBuffer.trim());
-          onEvent(event);
-        } catch {
-          // ignore incomplete JSON
-        }
-      }
 
       const duration = Date.now() - startTime;
       const elapsed = Math.floor(duration / 1000);

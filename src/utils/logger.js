@@ -31,14 +31,12 @@ const COLORS = {
 
 // Global state
 let currentRunId = null;
-let currentTicketKey = null;
 let currentStep = null;
 let stepStartTime = null;
 let runStartTime = null;
 let logDir = './logs';
 let runLogPath = null;
 let errorLogPath = null;
-let debugMode = true;
 
 export function initRun(ticketKey, logDirectory = './logs') {
   const now = new Date();
@@ -46,7 +44,6 @@ export function initRun(ticketKey, logDirectory = './logs') {
   const timeStr = now.toTimeString().split(' ')[0].replace(/:/g, '-');
 
   currentRunId = `${dateStr}_${timeStr}_${ticketKey || 'batch'}`;
-  currentTicketKey = ticketKey;
   runStartTime = now;
   logDir = logDirectory;
 
@@ -188,7 +185,6 @@ export function finalizeRun(success = true, summary = '') {
   }
 
   currentRunId = null;
-  currentTicketKey = null;
   runStartTime = null;
   runLogPath = null;
   errorLogPath = null;
@@ -219,7 +215,6 @@ export function err(...args) {
 }
 
 export function debug(...args) {
-  if (!debugMode) return;
   const message = args.join(' ');
   console.log(...formatConsole(COLORS.gray, '[DEBUG]', ...args));
   writeToFile('DEBUG', message);

@@ -9,14 +9,13 @@
 
 import fs from 'fs';
 import path from 'path';
-import { getTicketDetails, parseTicket, displayTicketDetails, validateTicket } from '../jira/index.js';
+import { getTicketDetails, parseTicket, displayTicketDetails, validateTicket, deleteStaleAgentComments } from '../jira/index.js';
 import { transitionToInProgress, transitionToLeadReview, postComment, addLabel, removeLabel } from '../jira/index.js';
 import { getServiceConfig, getRepoUrl } from '../utils/config.js';
 import { cloneAndBranch, commitAndPush, cleanup } from '../service/index.js';
 import { createPR } from '../service/azure.js';
 import { handleBaseTag } from '../service/base-tagger.js';
-import { buildCheatsheet, validateExecution } from '../prompt/index.js';
-import { execute } from '../agent/index.js';
+import { execute } from '../prompt/index.js';
 import {
   postJiraStep,
   postFinalJiraReport,
@@ -25,13 +24,22 @@ import {
   postInProgressComment,
   postLeadReviewComment,
 } from '../notification/index.js';
-import { stopServices } from '../infra/index.js';
-import { saveCheckpoint, loadCheckpoint, clearCheckpoint, getCheckpointPath } from './checkpoint.js';
+import { saveCheckpoint, clearCheckpoint, getCheckpointPath } from './checkpoint.js';
 import { bundleRunArtifact } from './bundler.js';
-import { STEPS, getStepNumber } from './steps.js';
+import { runDiffReviewLoop } from './diff-review.js';
+import { STEPS } from './steps.js';
 import * as logger from '../utils/logger.js';
 
 const { log, ok, warn, err, startStep, endStep, initRun, finalizeRun, getRunLogPaths } = logger;
+
+/** Guard: skip all JIRA comment/notification calls when muteComments is set. */
+function isMuted(config) {
+  if (config.jira?.muteComments) {
+    warn('[jira] muteComments=true — skipping JIRA comment');
+    return true;
+  }
+  return false;
+}
 
 /**
  * Run the full pipeline for a ticket.
@@ -42,9 +50,8 @@ const { log, ok, warn, err, startStep, endStep, initRun, finalizeRun, getRunLogP
  */
 export async function runPipeline(config, ticketOrKey) {
   const ticketKey = typeof ticketOrKey === 'string' ? ticketOrKey : ticketOrKey.key;
-  const runCtx = { infraStarted: false };
 
-  // Set _currentTicketKey so downstream modules (agent, debate) can use it for log filenames
+  // Set _currentTicketKey so downstream modules can use it for log filenames
   config._currentTicketKey = ticketKey;
 
   const runId = initRun(ticketKey, config.agent.logDir);
@@ -70,7 +77,7 @@ export async function runPipeline(config, ticketOrKey) {
     const validationErrors = validateTicket(config, ticket);
     if (validationErrors.length > 0) {
       for (const error of validationErrors) warn(`Validation failed: ${error}`);
-      await postComment(ticketKey, `Dr. Asthana: Cannot process ticket.\n\nValidation errors:\n${validationErrors.map(e => '- ' + e).join('\n')}`);
+      if (!isMuted(config)) await postComment(ticketKey, `Dr. Asthana: Cannot process ticket.\n\nValidation errors:\n${validationErrors.map(e => '- ' + e).join('\n')}`);
       endStep(false, `Validation failed: ${validationErrors.join(', ')}`);
       finalizeRun(false, 'Validation failed');
       return { success: false, reason: 'validation_failed', errors: validationErrors };
@@ -78,14 +85,21 @@ export async function runPipeline(config, ticketOrKey) {
     saveCheckpoint(ticketKey, STEPS.VALIDATE_TICKET, { ticketData: ticket });
     endStep(true, 'All required fields present');
 
+    // Clean up stale agent comments from previous failed runs
+    try {
+      await deleteStaleAgentComments(config, ticketKey);
+    } catch (e) {
+      warn(`Stale comment cleanup failed (non-blocking): ${e.message}`);
+    }
+
     // Transition to In-Progress + comment (both non-blocking, independent)
     try {
-      await transitionToInProgress(config, ticketKey);
+      if (!isMuted(config)) await transitionToInProgress(ticketKey);
     } catch (e) {
       warn(`In-Progress transition failed (non-blocking): ${e.message}`);
     }
     try {
-      await postInProgressComment(config, ticketKey, ticket);
+      if (!isMuted(config)) await postInProgressComment(config, ticketKey, ticket);
       log(`In-Progress comment posted for ${ticketKey}`);
     } catch (e) {
       warn(`In-Progress comment failed (non-blocking): ${e.message}`);
@@ -100,24 +114,19 @@ export async function runPipeline(config, ticketOrKey) {
 
     let pr = null;
     let failure = null;
-    let cheatsheetSummary = '';
 
     log(`\n--- Processing ${serviceName} / ${baseBranch} ---`);
 
     try {
       const result = await processServiceBranch(
         config, ticket, serviceConfig, repoUrl, ticketKey,
-        baseBranch, version, runCtx
+        baseBranch, version
       );
 
       if (result.pr) {
         pr = { service: serviceName, ...result.pr };
       } else if (result.error) {
         failure = { service: serviceName, baseBranch, error: result.error };
-      }
-
-      if (result.cheatsheetSummary) {
-        cheatsheetSummary = result.cheatsheetSummary;
       }
     } catch (branchError) {
       err(`Failed to process ${serviceName}/${baseBranch}: ${branchError.message}`);
@@ -127,8 +136,8 @@ export async function runPipeline(config, ticketOrKey) {
     const allPRs = pr ? [pr] : [];
     const allFailures = failure ? [failure] : [];
 
-    // ══════ Step 8: NOTIFY ══════
-    startStep(8, 'Update JIRA and send notifications');
+    // ══════ Step 7: NOTIFY ══════
+    startStep(7, 'Update JIRA and send notifications');
 
     // Bundle run artifact: copy run logs into artifact dir, tar, upload
     const runLogPaths = getRunLogPaths();
@@ -140,7 +149,7 @@ export async function runPipeline(config, ticketOrKey) {
       const noPrMsg = artifactUrl
         ? `Dr. Asthana: No PRs created. Manual implementation may be needed.\n\nRun Artifact: ${artifactUrl}`
         : 'Dr. Asthana: No PRs created. Manual implementation may be needed.';
-      await postComment(ticketKey, noPrMsg);
+      if (!isMuted(config)) await postComment(ticketKey, noPrMsg);
       endStep(false, 'No PRs created');
       finalizeRun(false, 'No PRs created');
       return { success: false, reason: 'no_prs_created' };
@@ -148,29 +157,29 @@ export async function runPipeline(config, ticketOrKey) {
 
     // Transition to LEAD REVIEW + comment (both non-blocking, independent)
     try {
-      await transitionToLeadReview(config, ticketKey);
+      if (!isMuted(config)) await transitionToLeadReview(ticketKey);
     } catch (e) {
       warn(`LEAD REVIEW transition failed (non-blocking): ${e.message}`);
     }
     try {
-      await postLeadReviewComment(config, ticketKey, allPRs, cheatsheetSummary);
+      if (!isMuted(config)) await postLeadReviewComment(config, ticketKey, allPRs);
     } catch (e) {
       warn(`Lead review comment failed (non-blocking): ${e.message}`);
     }
 
     // Post final JIRA comment
-    await postFinalJiraReport(config, ticketKey, allPRs, allFailures, cheatsheetSummary, artifactUrl);
+    if (!isMuted(config)) await postFinalJiraReport(config, ticketKey, allPRs, allFailures, artifactUrl);
 
     // Update labels
-    await removeLabel(ticketKey, config.jira.label);
+    if (!isMuted(config)) await removeLabel(ticketKey, config.jira.label);
     const versionMatch = pr.baseBranch.match(/version\/(.+)/);
     const processedLabel = versionMatch
       ? `${config.jira.labelProcessed}-${versionMatch[1]}`
       : config.jira.labelProcessed;
-    await addLabel(ticketKey, processedLabel);
+    if (!isMuted(config)) await addLabel(ticketKey, processedLabel);
 
     // Slack notification
-    await notifySlackSuccess(config, ticketKey, ticket.summary, allPRs, allFailures, cheatsheetSummary, artifactUrl);
+    if (!isMuted(config)) await notifySlackSuccess(config, ticketKey, ticket.summary, allPRs, allFailures, artifactUrl);
     endStep(true, 'JIRA comment and Slack notification sent');
 
     saveCheckpoint(ticketKey, STEPS.NOTIFY, { allPRs, allFailures });
@@ -199,64 +208,20 @@ export async function runPipeline(config, ticketOrKey) {
       const failMsg = failArtifactUrl
         ? `Dr. Asthana failed: ${error.message}\n\nRun Artifact: ${failArtifactUrl}`
         : `Dr. Asthana failed: ${error.message}`;
-      await postComment(ticketKey, failMsg);
-      await notifySlackFailure(config, ticketKey, { key: ticketKey, summary: ticketKey }, error, failArtifactUrl);
+      if (!isMuted(config)) await postComment(ticketKey, failMsg);
+      if (!isMuted(config)) await notifySlackFailure(config, ticketKey, { key: ticketKey, summary: ticketKey }, error, failArtifactUrl);
     } catch (e) {
       err(`Failed to send failure notification: ${e.message}`);
     }
     finalizeRun(false, `Error: ${error.message}`);
     return { success: false, reason: 'error', error: error.message };
-  } finally {
-    if (runCtx.infraStarted) {
-      await stopServices(config);
-    }
   }
 }
 
 /**
- * Resume a failed run from a specific step.
- *
- * @param {object} config
- * @param {string} ticketKey
- * @param {number|string} fromStep - Step number or name to resume from
+ * Process a single (service, branch) combination through steps 3-5.
  */
-export async function resume(config, ticketKey, fromStep) {
-  const checkpoint = loadCheckpoint(ticketKey);
-  if (!checkpoint) {
-    throw new Error(`No checkpoint found for ${ticketKey}`);
-  }
-
-  log(`Resuming ${ticketKey} from step ${fromStep}`);
-  log(`Checkpoint timestamp: ${checkpoint.timestamp}`);
-
-  // If resuming from step 5+, verify cheatsheet exists
-  const stepNum = typeof fromStep === 'number' ? fromStep : getStepNumber(fromStep);
-  if (stepNum >= 5 && !checkpoint.cheatsheet) {
-    throw new Error(`Cannot resume from step ${fromStep}: no cheatsheet found in checkpoint`);
-  }
-
-  // If resuming from step 3+, verify clone dir exists (or re-clone)
-  if (stepNum >= 3 && checkpoint.cloneDir) {
-    const { existsSync } = await import('fs');
-    if (!existsSync(checkpoint.cloneDir)) {
-      log(`Clone dir ${checkpoint.cloneDir} no longer exists, will re-clone at step 3`);
-      checkpoint.cloneDir = null;
-    }
-  }
-
-  // Re-run pipeline with checkpoint data
-  // For now, re-run from the beginning with saved ticket data
-  if (checkpoint.ticketData) {
-    return runPipeline(config, ticketKey);
-  }
-
-  throw new Error('Cannot resume: insufficient checkpoint data');
-}
-
-/**
- * Process a single (service, branch) combination through steps 3-7.
- */
-async function processServiceBranch(config, ticket, serviceConfig, repoUrl, ticketKey, baseBranch, version, runCtx) {
+async function processServiceBranch(config, ticket, serviceConfig, repoUrl, ticketKey, baseBranch, version) {
   let tmpDir = null;
 
   try {
@@ -282,95 +247,52 @@ async function processServiceBranch(config, ticket, serviceConfig, repoUrl, tick
       const reason = `Service ${serviceConfig.repo} uses npm (package-lock.json found, no pnpm-lock.yaml). Only pnpm services are supported.`;
       warn(reason);
       endStep(false, reason);
-      return { pr: null, error: reason, cheatsheetSummary: '' };
+      return { pr: null, error: reason };
     }
 
-    // Step 4: BUILD_CHEATSHEET
-    startStep(4, `Build cheatsheet for ${serviceConfig.repo}/${baseBranch}`);
-    const checkpointDir = getCheckpointPath(ticketKey);
-    const cheatsheetResult = await buildCheatsheet(ticket, tmpDir, config, {
-      checkpointDir,
-      ticketKey,
-    });
+    // Step 4: EXECUTE — direct execution, no council debate
+    startStep(4, `Execute for ${serviceConfig.repo}/${baseBranch}`);
+    const execResult = await execute(ticket, tmpDir, config, { ticketKey });
 
-    if (cheatsheetResult.status === 'rejected') {
-      warn(`Cheatsheet rejected (${cheatsheetResult.phase}): ${cheatsheetResult.reason}`);
-      endStep(false, `Rejected: ${cheatsheetResult.reason}`);
-      await postJiraStep(ticketKey, 'Cheatsheet Rejected', cheatsheetResult.reason);
-      return { pr: null, error: `Cheatsheet rejected: ${cheatsheetResult.reason}`, cheatsheetSummary: '' };
+    if (execResult.status === 'failed') {
+      warn(`Executor failed: ${execResult.reason}`);
+      endStep(false, execResult.reason);
+      return { pr: null, error: execResult.reason, executorOutput: '' };
     }
 
-    const cheatsheet = cheatsheetResult.cheatsheet;
-    saveCheckpoint(ticketKey, STEPS.BUILD_CHEATSHEET, {
+    const executorOutput = execResult.output;
+    saveCheckpoint(ticketKey, STEPS.EXECUTE, {
       ticketData: ticket,
       cloneDir: tmpDir,
       featureBranch,
-      cheatsheet,
-      cheatsheetPath: `${checkpointDir}/cheatsheet.md`,
+      executorOutput,
     });
-    endStep(true, `Cheatsheet ready (${cheatsheet.length} chars)`);
+    endStep(true, `Execution complete (${executorOutput.length} chars)`);
 
-    // Step 5: EXECUTE (with retries)
-    let executionResult;
-    let validationResult;
-    const maxRetries = config.agent.executionRetries || 2;
-    let retryFeedback = '';
+    // Step 5: DIFF_REVIEW — adversarial closed-loop review; fix until APPROVED or fail hard
+    startStep(5, 'Diff review (adversarial closed-loop)');
+    const diffReview = await runDiffReviewLoop(tmpDir, ticket, config);
 
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      startStep(5, `Execute cheatsheet (attempt ${attempt}/${maxRetries})`);
-      executionResult = await execute(cheatsheet, tmpDir, config, { feedback: retryFeedback });
-
-      if (!executionResult.output || executionResult.output.trim() === '') {
-        warn(`Execution attempt ${attempt} produced no output`);
-        endStep(false, 'No output');
-        if (attempt < maxRetries) continue;
-        return { pr: null, error: 'Execution produced no output', cheatsheetSummary: cheatsheet };
-      }
-
-      saveCheckpoint(ticketKey, STEPS.EXECUTE, {
-        ticketData: ticket,
-        cloneDir: tmpDir,
-        featureBranch,
-        cheatsheet,
-        executionOutput: executionResult.output.substring(0, 5000),
-      });
-      endStep(true, executionResult.completedNormally ? 'Execution completed' : `Exit code ${executionResult.exitCode}`);
-
-      // Step 6: VALIDATE_EXECUTION
-      startStep(6, 'Validate execution result');
-      validationResult = await validateExecution(cheatsheet, tmpDir);
-
-      // Retry only on critical issues (not warnings)
-      if (validationResult.critical?.length > 0 && attempt < maxRetries) {
-        warn(`Execution validation critical (attempt ${attempt}): ${validationResult.critical.join(', ')}`);
-        retryFeedback = `Execution validation failed with critical issues:\n${validationResult.critical.map((c) => `- CRITICAL: ${c}`).join('\n')}`;
-        endStep(false, 'Critical issues, retrying...');
-        continue;
-      }
-
-      if (validationResult.warnings?.length > 0) {
-        warn(`Validation warnings: ${validationResult.warnings.join(', ')}`);
-      }
-
-      endStep(validationResult.valid, validationResult.valid ? 'Validation passed' : `Issues: ${validationResult.issues.join(', ')}`);
-      break;
+    if (diffReview.skipped) {
+      endStep(true, 'Skipped (empty diff)');
+    } else if (diffReview.approved) {
+      endStep(true, `Approved after ${diffReview.attempts} attempt(s)`);
+    } else {
+      // Loop exhausted without approval — hard failure, no PR
+      const summary = `Diff review could not reach APPROVED after ${diffReview.attempts} attempt(s)`;
+      endStep(false, summary);
+      await postJiraStep(ticketKey, 'Diff Review Failed', `${summary}\n\n${diffReview.finalIssues}`, config);
+      return { pr: null, error: summary, executorOutput };
     }
 
-    // Block shipping if critical validation issues remain after all attempts
-    if (validationResult?.critical?.length > 0) {
-      const criticalMsg = validationResult.critical.join(', ');
-      warn(`Blocking ship: critical validation issues unresolved — ${criticalMsg}`);
-      return { pr: null, error: `Critical validation failure: ${criticalMsg}`, cheatsheetSummary: cheatsheet };
-    }
-
-    // Step 7: SHIP
-    startStep(7, `Commit and push ${serviceConfig.repo}/${baseBranch}`);
+    // Step 6: SHIP
+    startStep(6, `Commit and push ${serviceConfig.repo}/${baseBranch}`);
     const { pushed } = await commitAndPush(tmpDir, featureBranch, ticketKey, ticket.summary, serviceHasInstructionFile, instructionFile);
 
     if (!pushed) {
       warn('No changes to commit');
       endStep(false, 'No changes');
-      return { pr: null, error: 'No changes to commit', cheatsheetSummary: cheatsheet };
+      return { pr: null, error: 'No changes to commit' };
     }
 
     // Handle base tag
@@ -387,10 +309,7 @@ async function processServiceBranch(config, ticket, serviceConfig, repoUrl, tick
     // Create PR
     const prResult = await createPR(
       config, tmpDir, featureBranch, baseBranch, ticketKey, ticket.summary,
-      cheatsheet, {
-        validationIssues: validationResult?.warnings || [],
-        critical: validationResult?.critical || [],
-      }
+      executorOutput
     );
 
     if (prResult?.prId) {
@@ -398,15 +317,15 @@ async function processServiceBranch(config, ticket, serviceConfig, repoUrl, tick
       log(`PR #${prResult.prId} ${action}`);
       saveCheckpoint(ticketKey, STEPS.SHIP, {
         ticketData: ticket,
-        prData: { prId: prResult.prId, prUrl: prResult.prUrl, baseBranch, version },
+        prData: { prId: prResult.prId, prUrl: prResult.prUrl, baseBranch },
       });
       endStep(true, `PR #${prResult.prId} (${action})`);
-      return { pr: { prId: prResult.prId, prUrl: prResult.prUrl, baseBranch, version }, cheatsheetSummary: cheatsheet };
+      return { pr: { prId: prResult.prId, prUrl: prResult.prUrl, baseBranch } };
     }
 
     warn('PR creation failed');
     endStep(false, 'PR creation failed');
-    return { pr: null, error: 'PR creation failed', cheatsheetSummary: cheatsheet };
+    return { pr: null, error: 'PR creation failed' };
 
   } finally {
     if (tmpDir) {

@@ -12,7 +12,7 @@ import { log, debug } from '../../utils/logger.js';
  *
  * @returns {boolean} true when line was valid JSON and counted as an event
  */
-export function processOutputLine({ line, onEvent, label, logSummaryLines }) {
+export function processOutputLine({ line, label, logSummaryLines }) {
   const trimmed = line.trim();
   if (!trimmed) return false;
 
@@ -20,11 +20,9 @@ export function processOutputLine({ line, onEvent, label, logSummaryLines }) {
   try {
     event = JSON.parse(trimmed);
   } catch {
-    if (onEvent) onEvent({ type: 'raw', text: trimmed });
     return false;
   }
 
-  if (onEvent) onEvent(event);
   appendSummaryForEvent(event, label, logSummaryLines);
   return true;
 }

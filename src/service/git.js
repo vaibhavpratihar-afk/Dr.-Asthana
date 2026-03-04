@@ -97,13 +97,7 @@ export async function cloneAndBranch(config, repoUrl, baseBranch, ticketKey, tic
       log(`Service has its own ${instructionFile}`);
     }
 
-    return {
-      tmpDir,
-      featureBranch,
-      baseBranch,
-      serviceHasInstructionFile,
-      instructionFile,
-    };
+    return { tmpDir, featureBranch, serviceHasInstructionFile, instructionFile };
   } catch (error) {
     cleanup(tmpDir);
     throw error;

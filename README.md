@@ -1,120 +1,75 @@
 # Auto Dev Agent
 
-Autonomous JIRA-to-PR agent with a council-first workflow.
+Autonomous JIRA-to-PR pipeline. Reads a JIRA ticket, clones the target repo, runs a Codex agent to implement the changes, runs an adversarial diff review loop, and ships a PR on Azure DevOps.
 
-## Core Model
+## Pipeline
 
-The system splits work into two phases:
+```
+1. Fetch + validate ticket
+2. Clone repo → create feature branch
+3. Execute  — Codex agent implements changes
+4. Diff review loop  — adversarial reviewer flags issues, Codex fixes, repeat until APPROVED
+5. Commit + push
+6. Create PR on Azure DevOps
+7. Notify JIRA + Slack
+```
 
-1. Council phase (expensive models): produce an execution plan.
-2. Execution phase (cheap model): apply the plan with minimal interpretation.
+The executor receives: the persona prompt, ticket context (summary, description, comments, target branch), and codebase context (instruction files, file tree, package.json, referenced files pre-loaded).
 
-The council is **artifact-first**:
-- Reasoning is exchanged via `.md` files.
-- Deterministic control signals are exchanged via `.json` files.
-- No semantic in-memory handoff between council members.
-
-## Council Protocol (Current)
-
-Each round follows:
-1. Proposer writes `rounds/round-N/proposer.md`
-2. Critics write `rounds/round-N/critic-*.md`
-3. Evaluator writes `rounds/round-N/evaluation.md` and updates `rounds/round-N/control.json`
-
-Contract files:
-- `rounds/round-N/evaluation-contract.json`
-
-Shared files (cross-round state):
-- `context/ticket-context.md`
-- `context/roles.md`
-- `shared/scope-lock.md`
-- `shared/blockers.md`
-- `shared/decisions.md`
-- `shared/evaluator-feedback.md`
-- `shared/protocol.md`
-
-Only JSON is used for deterministic control (e.g. `nextAction`, agreement decision, evaluation verdict).
-
-## Cheatsheet Rules
-
-- Proposer must emit a complete, executor-ready cheatsheet between:
-  - `=== CHEATSHEET START ===`
-  - `=== CHEATSHEET END ===`
-- Evaluator approval does not need to re-emit cheatsheet; extraction can reuse proposer output markers.
-- Evaluation input combines proposer + critic artifacts.
-
-## Provider Behavior
-
-- Codex runs with additional writable artifact dirs when needed.
-- Because Codex `exec resume` does not support `--add-dir`, council runs may start fresh Codex sessions instead of resuming when extra writable dirs are required.
+The diff reviewer is a separate Codex call that sees only the raw diff and ticket requirements — no shared state with the executor. It returns `APPROVED` or `NEEDS_CHANGES` with specific issues. On `NEEDS_CHANGES` a targeted fix pass runs and the loop repeats (up to `diffReview.maxRetries`). If the loop exhausts retries without approval, the run fails and no PR is created.
 
 ## Project Structure
 
-```text
-src/
-  ai-provider/      # AI CLI adapters, runtime, strategies
-  agent/            # cheap executor
-  council/          # council engine (artifact protocol)
-    config/
-    contract/
-    evaluator/
-    orchestrator/
-    runtime/
-    stages/
-  jira/             # ticket read/write helpers
-  notification/     # JIRA + Slack reporting
-  pipeline/         # end-to-end step orchestration + checkpoints
-  prompt/           # prompt/context builders
-  service/          # git + Azure DevOps PR helpers
-  utils/            # config, logger, misc helpers
 ```
-
-## Runtime Flow
-
-1. Fetch + validate ticket.
-2. Clone target repo + branch setup.
-3. Build cheatsheet via council.
-4. Execute cheatsheet.
-5. Validate output.
-6. Create/update PR.
-7. Notify JIRA + Slack.
+src/
+  ai-provider/          # Codex CLI adapter + spawn runtime
+    adapters/codex.js   # arg builder, stream parser
+    provider/           # spawn-runtime, event-parser, log-writer
+  jira/                 # JIRA API client, ADF parser, transitions, validator
+  notification/         # JIRA comment + Slack DM builders
+  pipeline/             # step orchestrator, checkpoint, diff-review loop, artifact bundler
+  personas/             # executor.prompt.md, diff-reviewer.persona.md
+  prompt/               # prompt builder, ticket context, codebase context
+  service/              # git operations, Azure DevOps PR, base image tagger
+  utils/                # config loader, logger, AI summariser
+```
 
 ## Configuration
 
-Main config lives in `config.json`.
-See `config.example.json` for full schema.
+Copy `config.example.json` → `config.json` and fill in:
 
-Important sections:
-- `jira`
-- `azureDevOps`
-- `services`
-- `agent`
-- `aiProvider`
-- `council`
+| Section | Required fields |
+|---|---|
+| `jira` | `baseUrl`, `email`, `apiToken`, `label` |
+| `azureDevOps` | `org`, `project`, `repoBaseUrl` |
+| `services` | map of service name → `{ repo }` |
+| `agent` | `pollInterval`, `maxTicketsPerCycle`, `logDir` |
+| `aiProvider.execute` | `provider` (`codex`), `codex.model`, `codex.timeoutMinutes` |
+| `diffReview` | `maxRetries` |
+| `slack` | `botToken`, `userId` (optional) |
 
 ## Commands
 
 ```bash
-pnpm start                    # daemon mode
-pnpm run single -- JCP-123    # process one ticket
-pnpm run dry-run              # inspect only, no changes
-pnpm run resume -- JCP-123 --from-step=5
+pnpm start                     # daemon — polls JIRA label on interval
+pnpm run single -- JCP-123     # process one ticket
+pnpm run dry-run               # fetch + display tickets, no execution
+pnpm run resume -- JCP-123     # re-run a ticket from scratch
 ```
 
 ## Artifacts
 
-All per-ticket artifacts live under:
-- `.pipeline-state/<TICKET_KEY>/`
+Per-ticket artifacts live under `.pipeline-state/<TICKET_KEY>/`:
+- `ai-calls/<label>.prompt.md` — prompt sent to each AI call
+- `ai-calls/<label>.log` — agent output summary per call
+- `state.json` — pipeline checkpoint
 
-Council workspace lives under:
-- `.pipeline-state/<TICKET_KEY>/council/`
-
-Logs live under:
-- `logs/YYYY-MM-DD/*.log`
+Run logs live under `logs/YYYY-MM-DD/`.
 
 ## Design Principles
 
-- Deterministic control flow.
-- File-backed auditability.
-- Minimal hidden state.
-- Fail closed when plan quality is insufficient.
+- Single-agent execution — no planning council, no debate rounds.
+- Adversarial quality gate — diff reviewer is independent, sees only diff + ticket.
+- Fail closed — if diff review cannot reach APPROVED, no PR is created.
+- File-backed auditability — every AI call prompt and output is persisted.
+- Minimal hidden state — config and ticket drive all decisions.

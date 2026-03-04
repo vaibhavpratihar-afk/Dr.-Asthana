@@ -57,6 +57,7 @@ export function loadConfig() {
       label: raw.jira.label,
       labelProcessed: raw.jira.labelProcessed || `${raw.jira.label}-done`,
       maxComments: raw.jira?.maxComments || 100,
+      muteComments: raw.jira?.muteComments ?? false,
       fields: raw.jira.fields || {
         affectedSystems: 'customfield_10056',
         fixVersions: 'fixVersions',
@@ -76,94 +77,27 @@ export function loadConfig() {
       pollInterval: raw.agent?.pollInterval || 300,
       maxTicketsPerCycle: raw.agent?.maxTicketsPerCycle || 1,
       logDir: raw.agent?.logDir || './logs',
-      executionRetries: raw.agent?.executionRetries ?? 1,
     },
-    council: buildCouncilConfig(raw),
+    diffReview: { maxRetries: raw.diffReview?.maxRetries ?? 5 },
     aiProvider: buildAiProviderConfig(raw),
-    infra: {
-      enabled: raw.infra?.enabled ?? false,
-      scriptsDir: raw.infra?.scriptsDir || '',
-      stopAfterProcessing: raw.infra?.stopAfterProcessing ?? false,
-    },
-    tests: {
-      enabled: raw.tests?.enabled ?? false,
-    },
   };
 
   return config;
 }
 
-function buildModeConfig(modeRaw, defaults) {
-  const { claudeModel, claudeMaxTurns, claudeTimeout, codexTimeout, allowedTools } = defaults;
-  return {
-    provider: modeRaw?.provider || 'claude',
-    fallbackProvider: modeRaw?.fallbackProvider || null,
-    allowedTools: modeRaw?.allowedTools || modeRaw?.claude?.allowedTools || allowedTools,
-    claude: {
-      model: modeRaw?.claude?.model || claudeModel,
-      maxTurns: modeRaw?.claude?.maxTurns || claudeMaxTurns,
-      timeoutMinutes: modeRaw?.claude?.timeoutMinutes || claudeTimeout,
-      allowedTools: modeRaw?.claude?.allowedTools || allowedTools,
-    },
-    codex: {
-      model: modeRaw?.codex?.model || null,
-      timeoutMinutes: modeRaw?.codex?.timeoutMinutes || codexTimeout,
-    },
-  };
-}
-
-function buildCouncilConfig(raw) {
-  return buildCouncilConfigSection(raw.council || {});
-}
-
-function buildCouncilConfigSection(councilRaw = {}) {
-  const normalizeMember = (member, defaults) => ({
-    provider: member?.provider || defaults.provider,
-    model: member?.model || defaults.model,
-    maxTurns: member?.maxTurns || defaults.maxTurns,
-    timeoutMinutes: member?.timeoutMinutes || defaults.timeoutMinutes,
-    allowedTools: member?.allowedTools || defaults.allowedTools,
-  });
-  const debateDefaults = {
-    provider: 'claude',
-    model: 'sonnet',
-    maxTurns: 15,
-    timeoutMinutes: 10,
-    allowedTools: 'Read,Glob,Grep',
-  };
-  const evaluateDefaults = {
-    provider: 'claude',
-    model: 'sonnet',
-    maxTurns: 5,
-    timeoutMinutes: 5,
-    allowedTools: 'Read,Glob,Grep',
-  };
-  const proposer = normalizeMember(councilRaw.proposer, debateDefaults);
-  const critics = Array.isArray(councilRaw.critics) && councilRaw.critics.length > 0
-    ? councilRaw.critics.map((critic) => normalizeMember(critic, debateDefaults))
-    : [normalizeMember(null, debateDefaults)];
-  const evaluator = normalizeMember(councilRaw.evaluator, evaluateDefaults);
-  return {
-    // Preserve all council-level policy knobs while normalizing members.
-    ...councilRaw,
-    maxRounds: councilRaw.maxRounds || 3,
-    proposer,
-    critics,
-    evaluator,
-  };
-}
-
 function buildAiProviderConfig(raw) {
   const ai = raw.aiProvider || {};
-
-  const execute = {
-    ...buildModeConfig(ai.execute, {
-      claudeModel: 'haiku', claudeMaxTurns: 30, claudeTimeout: 15,
-      codexTimeout: 15, allowedTools: 'Read,Write,Edit,Bash,Glob,Grep',
-    }),
+  const codexRaw = ai.execute?.codex || {};
+  return {
+    execute: {
+      provider: ai.execute?.provider || 'codex',
+      allowedTools: ai.execute?.allowedTools || 'Read,Write,Edit,Bash,Glob,Grep',
+      codex: {
+        model: codexRaw.model || null,
+        timeoutMinutes: codexRaw.timeoutMinutes || 30,
+      },
+    },
   };
-
-  return { strategy: ai.strategy || 'single', execute };
 }
 
 /**

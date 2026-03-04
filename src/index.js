@@ -7,14 +7,14 @@
  *   daemon                      Run the poll loop continuously
  *   single <KEY>                Process one specific ticket
  *   dry-run                     Poll once, log what would happen, don't execute
- *   resume <KEY> --from-step=N  Resume a failed run from a specific step
+ *   resume <KEY>                Re-run a ticket from scratch
  */
 
 import { loadConfig } from './utils/config.js';
 import { getTicketDetails, parseTicket, displayTicketDetails, searchTickets } from './jira/index.js';
-import { runPipeline, resume as resumePipeline } from './pipeline/index.js';
+import { runPipeline } from './pipeline/index.js';
 import { getProviderLabel } from './ai-provider/index.js';
-import { log, ok, warn, err } from './utils/logger.js';
+import { log, warn, err } from './utils/logger.js';
 import * as logger from './utils/logger.js';
 
 function sleep(seconds) {
@@ -95,16 +95,6 @@ async function runDaemon(config) {
   }
 }
 
-async function runResume(config, ticketKey, fromStep) {
-  log(`Resuming ${ticketKey} from step ${fromStep}...`);
-  try {
-    await resumePipeline(config, ticketKey, fromStep);
-  } catch (error) {
-    err(`Failed to resume ${ticketKey}: ${error.message}`);
-    process.exit(1);
-  }
-}
-
 function printUsage() {
   console.log(`
 == Dr. Asthana v2 ==
@@ -116,7 +106,7 @@ Commands:
   daemon                      Run the poll loop continuously
   single <KEY>                Process one specific ticket (e.g., single JCP-123)
   dry-run                     Poll once, show ticket details, don't execute
-  resume <KEY> --from-step=N  Resume a failed run from a specific step
+  resume <KEY>                Re-run a ticket from scratch
 
 Configuration:
   Edit config.json in the project root.
@@ -156,12 +146,10 @@ async function main() {
     case 'resume': {
       const ticketKey = args[1];
       if (!ticketKey) {
-        err('Missing ticket key. Usage: resume <TICKET-KEY> --from-step=N');
+        err('Missing ticket key. Usage: resume <TICKET-KEY>');
         process.exit(1);
       }
-      const fromStepArg = args.find(a => a.startsWith('--from-step='));
-      const fromStep = fromStepArg ? parseInt(fromStepArg.split('=')[1], 10) : 5;
-      await runResume(config, ticketKey, fromStep);
+      await runSingle(config, ticketKey);
       break;
     }
 

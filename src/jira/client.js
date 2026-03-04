@@ -6,10 +6,7 @@
 import { getAuthHeader } from '../utils/config.js';
 import { log, warn } from '../utils/logger.js';
 
-/**
- * Fetch JSON from JIRA REST API
- */
-export async function fetchJSON(config, url, options = {}) {
+async function fetchJSON(config, url, options = {}) {
   const response = await fetch(url, {
     method: 'GET',
     ...options,
@@ -26,33 +23,6 @@ export async function fetchJSON(config, url, options = {}) {
   }
 
   return response.json();
-}
-
-/**
- * POST JSON to JIRA REST API
- */
-export async function postJSON(config, url, body) {
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      Authorization: getAuthHeader(config),
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    },
-    body: JSON.stringify(body),
-  });
-
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`JIRA API POST ${response.status}: ${text}`);
-  }
-
-  // Some endpoints return 204 with no body
-  const contentType = response.headers.get('content-type');
-  if (contentType && contentType.includes('application/json')) {
-    return response.json();
-  }
-  return null;
 }
 
 /**
@@ -102,14 +72,66 @@ export async function getTicketDetails(config, ticketKey) {
 }
 
 /**
- * Get the current status name of a ticket
+ * Delete stale agent-generated comments from a ticket before a fresh run.
+ * Identifies agent comments by known prefixes in the body text.
  */
-export async function getTicketStatus(config, ticketKey) {
+export async function deleteStaleAgentComments(config, ticketKey) {
+  const AGENT_PATTERNS = [
+    /^Dr\. Asthana/,
+    /^\*\*Step:/,
+    /^### Starting Work/,
+    /^\*\*Step: Council/,
+  ];
+
   try {
-    const url = `${config.jira.baseUrl}/rest/api/3/issue/${ticketKey}?fields=status`;
+    const url = `${config.jira.baseUrl}/rest/api/3/issue/${ticketKey}/comment?maxResults=100`;
     const data = await fetchJSON(config, url);
-    return data.fields?.status?.name || null;
-  } catch {
-    return null;
+    const comments = data.comments || [];
+
+    const stale = comments.filter(c => {
+      const text = c.body?.content
+        ? extractPlainText(c.body)
+        : (typeof c.body === 'string' ? c.body : '');
+      return AGENT_PATTERNS.some(p => p.test(text.trimStart()));
+    });
+
+    let deleted = 0;
+    for (const comment of stale) {
+      const delUrl = `${config.jira.baseUrl}/rest/api/3/issue/${ticketKey}/comment/${comment.id}`;
+      const response = await fetch(delUrl, {
+        method: 'DELETE',
+        headers: { Authorization: getAuthHeader(config) },
+      });
+      if (response.status === 204) {
+        deleted++;
+      } else {
+        warn(`Failed to delete comment ${comment.id}: HTTP ${response.status}`);
+      }
+    }
+
+    if (deleted > 0) {
+      log(`Deleted ${deleted} stale agent comment(s) from ${ticketKey}`);
+    }
+    return deleted;
+  } catch (e) {
+    warn(`deleteStaleAgentComments failed (non-blocking): ${e.message}`);
+    return 0;
   }
 }
+
+/**
+ * Extract plain text from JIRA ADF body for comment matching.
+ */
+function extractPlainText(body) {
+  if (!body || !body.content) return '';
+  const chunks = [];
+  function walk(nodes) {
+    for (const node of nodes || []) {
+      if (node.type === 'text') chunks.push(node.text || '');
+      if (node.content) walk(node.content);
+    }
+  }
+  walk(body.content);
+  return chunks.join('');
+}
+

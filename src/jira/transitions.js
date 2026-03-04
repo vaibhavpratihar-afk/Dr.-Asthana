@@ -81,7 +81,7 @@ function runJiraCliTransition(ticketKey, transitionName, label) {
   return runJiraCli(['transition', ticketKey, transitionName], label, TRANSITION_TIMEOUT);
 }
 
-export async function transitionToInProgress(config, ticketKey) {
+export async function transitionToInProgress(ticketKey) {
   log(`Transitioning ${ticketKey} to In-Progress (Dev Started)...`);
   const result = await runJiraCliTransition(ticketKey, 'Dev Started', `in-progress-${ticketKey}`);
   if (result.success) {
@@ -92,7 +92,7 @@ export async function transitionToInProgress(config, ticketKey) {
   return false;
 }
 
-export async function transitionToLeadReview(config, ticketKey) {
+export async function transitionToLeadReview(ticketKey) {
   log(`Transitioning ${ticketKey} to LEAD REVIEW (Dev Testing -> EM Review)...`);
 
   const devResult = await runJiraCliTransition(ticketKey, 'Dev Testing', `dev-testing-${ticketKey}`);
