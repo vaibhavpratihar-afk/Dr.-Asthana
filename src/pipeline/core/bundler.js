@@ -1,15 +1,18 @@
 /**
- * Run artifact bundler.
- *
- * Copies run logs into the artifact directory, creates a .tar.gz,
- * and uploads it to Pixelbin CDN.
+ * File: src/pipeline/core/bundler.js
+ * Module: pipeline
+ * Purpose: Module implementation for domain-specific behavior in this subsystem.
+ * Key Exports: bundleRunArtifact
+ * Integration Points: Integrates with Jira, service, prompt, notification, and logger modules.
+ * Data Flow: Keep side effects explicit; keep pure transformations isolated where possible.
+ * Maintenance Notes: Header intentionally documents file intent for fast onboarding and review.
  */
-
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { log, warn } from '../utils/logger.js';
+import { log, warn } from '../../utils/logger.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -64,11 +67,15 @@ export async function bundleRunArtifact(ticketKey, artifactDir, runLogPaths) {
   // 3. Upload via pixelbin-upload (async)
   let url = null;
   try {
-    const { stdout } = await execFileAsync(
-      '/bin/bash',
-      ['-c', `~/.local/bin/pixelbin-upload "${tarballPath}" --json --unique --format raw --no-progress`],
-      { timeout: 120000 }
-    );
+    const pixelbinBin = path.join(os.homedir(), '.local', 'bin', 'pixelbin-upload');
+    const { stdout } = await execFileAsync(pixelbinBin, [
+      tarballPath,
+      '--json',
+      '--unique',
+      '--format',
+      'raw',
+      '--no-progress',
+    ], { timeout: 120000 });
     const parsed = JSON.parse(stdout);
     url = parsed.url || parsed.cdnUrl || null;
     log(`[bundler] Uploaded artifact: ${url}`);
@@ -76,10 +83,16 @@ export async function bundleRunArtifact(ticketKey, artifactDir, runLogPaths) {
     warn(`[bundler] Upload failed (non-blocking): ${e.message}`);
   }
 
-  // 4. Clean up tarball
-  try {
-    fs.unlinkSync(tarballPath);
-  } catch { /* non-critical */ }
+  // 4. Clean up tarball when upload succeeded; otherwise keep local fallback.
+  let localPath = null;
+  if (url) {
+    try {
+      fs.unlinkSync(tarballPath);
+    } catch { /* non-critical */ }
+  } else if (fs.existsSync(tarballPath)) {
+    localPath = tarballPath;
+    warn(`[bundler] Keeping local artifact tarball: ${tarballPath}`);
+  }
 
-  return { url, localPath: tarballPath };
+  return { url, localPath };
 }

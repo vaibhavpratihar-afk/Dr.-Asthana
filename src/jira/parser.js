@@ -1,151 +1,25 @@
 /**
- * Ticket data extraction from raw JIRA responses.
- * Full ADF-to-markdown conversion.
+ * File: src/jira/parser.js
+ * Module: jira
+ * Purpose: Jira payload parsing and ADF conversion into normalized ticket objects.
+ * Key Exports: parseTicket, displayTicketDetails
+ * Integration Points: Integrates with Jira APIs/CLI and pipeline-facing parsers/validators.
+ * Data Flow: Keep side effects explicit; keep pure transformations isolated where possible.
+ * Maintenance Notes: Header intentionally documents file intent for fast onboarding and review.
  */
+import { extractTextFromADF } from './core/adf-parser.js';
 
-/**
- * Apply ADF text marks as markdown syntax.
- */
-function applyMarks(text, marks) {
-  if (!marks || !Array.isArray(marks) || marks.length === 0) {
-    return text;
-  }
-  let result = text;
-  for (const mark of marks) {
-    switch (mark.type) {
-      case 'strong':
-        result = `**${result}**`;
-        break;
-      case 'em':
-        result = `*${result}*`;
-        break;
-      case 'code':
-        result = `\`${result}\``;
-        break;
-      case 'strike':
-        result = `~~${result}~~`;
-        break;
-      case 'link':
-        result = mark.attrs?.href ? `[${result}](${mark.attrs.href})` : result;
-        break;
-    }
-  }
-  return result;
-}
-
-/**
- * Extract plain text from Atlassian Document Format (ADF)
- */
-function extractTextFromADF(content) {
-  if (!Array.isArray(content)) {
-    return '';
-  }
-
-  const textParts = [];
-
-  for (const node of content) {
-    switch (node.type) {
-      case 'text':
-        if (node.text) textParts.push(applyMarks(node.text, node.marks));
-        break;
-      case 'hardBreak':
-        textParts.push('\n');
-        break;
-      case 'paragraph':
-        if (node.content) {
-          textParts.push(extractTextFromADF(node.content));
-          textParts.push('\n');
-        }
-        break;
-      case 'bulletList':
-        if (node.content) {
-          for (const listItem of node.content) {
-            textParts.push('- ');
-            textParts.push(extractTextFromADF(listItem.content || []));
-            textParts.push('\n');
-          }
-        }
-        break;
-      case 'orderedList':
-        if (node.content) {
-          for (let i = 0; i < node.content.length; i++) {
-            textParts.push(`${i + 1}. `);
-            textParts.push(extractTextFromADF(node.content[i].content || []));
-            textParts.push('\n');
-          }
-        }
-        break;
-      case 'table':
-        if (node.content) {
-          const rows = [];
-          let isFirstRow = true;
-          for (const row of node.content) {
-            if (row.type !== 'tableRow' || !row.content) continue;
-            const cells = row.content.map((cell) => {
-              const cellText = extractTextFromADF(cell.content || []);
-              return cellText.replace(/\n/g, ' ').trim();
-            });
-            rows.push(`| ${cells.join(' | ')} |`);
-            if (isFirstRow) {
-              rows.push(`| ${cells.map(() => '---').join(' | ')} |`);
-              isFirstRow = false;
-            }
-          }
-          textParts.push(rows.join('\n'));
-          textParts.push('\n');
-        }
-        break;
-      case 'blockquote':
-        textParts.push((extractTextFromADF(node.content || [])).split('\n').map((line) => `> ${line}`).join('\n'));
-        textParts.push('\n');
-        break;
-      case 'panel': {
-        const panelType = (node.attrs?.panelType || 'info').toUpperCase();
-        textParts.push(`[${panelType}] `);
-        textParts.push(extractTextFromADF(node.content || []));
-        textParts.push('\n');
-        break;
-      }
-      case 'inlineCard':
-        textParts.push(node.attrs?.url || '');
-        break;
-      case 'mention':
-        textParts.push(`@${node.attrs?.text || node.attrs?.id || 'unknown'}`);
-        break;
-      case 'codeBlock':
-        if (node.content) {
-          textParts.push('```\n');
-          textParts.push(extractTextFromADF(node.content));
-          textParts.push('\n```\n');
-        }
-        break;
-      case 'heading':
-        if (node.content) {
-          const level = node.attrs?.level || 1;
-          textParts.push('#'.repeat(level) + ' ');
-          textParts.push(extractTextFromADF(node.content));
-          textParts.push('\n');
-        }
-        break;
-      default:
-        if (node.content) {
-          textParts.push(extractTextFromADF(node.content));
-        }
-        break;
-    }
-  }
-
-  return textParts.join('').trim();
-}
+const NO_DESCRIPTION = 'No description provided';
+const NO_SUMMARY = 'No summary';
 
 function extractDescription(ticket) {
   const description = ticket.fields?.description;
-  if (!description) return 'No description provided';
+  if (!description) return NO_DESCRIPTION;
   if (typeof description === 'string') return description;
   if (description.type === 'doc' && description.content) {
     return extractTextFromADF(description.content);
   }
-  return 'No description provided';
+  return NO_DESCRIPTION;
 }
 
 function extractComments(ticket) {
@@ -172,29 +46,36 @@ function extractAffectedSystems(config, ticket) {
   return affectedSystems.map((s) => s.value || s.name || s).filter(Boolean);
 }
 
-function extractBranchFromFixVersion(ticket) {
-  const fixVersions = ticket.fields?.fixVersions;
-  if (!fixVersions || !Array.isArray(fixVersions) || fixVersions.length === 0) return null;
-  const versionName = fixVersions[0].name || fixVersions[0];
-  const match = versionName.match(/v?(\d+\.\d+\.\d+)/i);
-  return match ? `version/${match[1]}` : null;
+function extractVersion(value) {
+  const versionName = value?.name || value;
+  const match = String(versionName || '').match(/v?(\d+\.\d+\.\d+)/i);
+  if (!match) return null;
+  return { versionName, version: match[1], branch: `version/${match[1]}` };
 }
 
-function extractAllBranches(ticket) {
-  const fixVersions = ticket.fields?.fixVersions;
+function getFixVersions(config, ticket) {
+  const field = config.jira.fields.fixVersions || 'fixVersions';
+  const fixVersions = ticket.fields?.[field];
+  return Array.isArray(fixVersions) ? fixVersions : [];
+}
+
+function extractBranchFromFixVersion(config, ticket) {
+  const fixVersions = getFixVersions(config, ticket);
+  if (fixVersions.length === 0) return null;
+  const parsed = extractVersion(fixVersions[0]);
+  return parsed ? parsed.branch : null;
+}
+
+function extractAllBranches(config, ticket) {
+  const fixVersions = getFixVersions(config, ticket);
   if (!fixVersions || !Array.isArray(fixVersions) || fixVersions.length === 0) return [];
   return fixVersions
-    .map((fv) => {
-      const versionName = fv.name || fv;
-      const match = versionName.match(/v?(\d+\.\d+\.\d+)/i);
-      if (!match) return null;
-      return { branch: `version/${match[1]}`, versionName, version: match[1] };
-    })
+    .map((fv) => extractVersion(fv))
     .filter(Boolean);
 }
 
-function getFixVersionName(ticket) {
-  const fixVersions = ticket.fields?.fixVersions;
+function getFixVersionName(config, ticket) {
+  const fixVersions = getFixVersions(config, ticket);
   if (!fixVersions || !Array.isArray(fixVersions) || fixVersions.length === 0) return null;
   return fixVersions[0].name || fixVersions[0];
 }
@@ -202,19 +83,22 @@ function getFixVersionName(ticket) {
 export function parseTicket(config, ticket) {
   return {
     key: ticket.key,
-    summary: ticket.fields?.summary || 'No summary',
+    summary: ticket.fields?.summary || NO_SUMMARY,
     description: extractDescription(ticket),
     comments: extractComments(ticket),
     type: ticket.fields?.issuetype?.name || 'Unknown',
     priority: ticket.fields?.priority?.name || 'None',
     status: ticket.fields?.status?.name || 'Unknown',
     affectedSystems: extractAffectedSystems(config, ticket),
-    fixVersion: getFixVersionName(ticket),
-    targetBranch: extractBranchFromFixVersion(ticket),
-    targetBranches: extractAllBranches(ticket),
+    fixVersion: getFixVersionName(config, ticket),
+    targetBranch: extractBranchFromFixVersion(config, ticket),
+    targetBranches: extractAllBranches(config, ticket),
   };
 }
 
+/**
+ * Render ticket context to logs in a compact, scan-friendly shape.
+ */
 export function displayTicketDetails(ticket, loggerInstance) {
   const { log } = loggerInstance;
   log('');
@@ -229,8 +113,8 @@ export function displayTicketDetails(ticket, loggerInstance) {
   log(`Fix Version:      ${ticket.fixVersion || 'None'}`);
   log(`Target Branch:    ${ticket.targetBranch || 'None'}`);
   if (ticket.targetBranches && ticket.targetBranches.length > 1) {
-    log(`Fix Versions:     ${ticket.targetBranches.map(tb => tb.versionName).join(', ')}`);
-    log(`Target Branches:  ${ticket.targetBranches.map(tb => tb.branch).join(', ')}`);
+    log(`Fix Versions:     ${ticket.targetBranches.map((item) => item.versionName).join(', ')}`);
+    log(`Target Branches:  ${ticket.targetBranches.map((item) => item.branch).join(', ')}`);
   }
   log('');
   log(`Description: ${(ticket.description || 'No description').substring(0, 200)}...`);

@@ -1,24 +1,38 @@
 #!/usr/bin/env node
-
 /**
- * Dr. Asthana v2 - CLI Entry Point
- *
- * Commands:
- *   daemon                      Run the poll loop continuously
- *   single <KEY>                Process one specific ticket
- *   dry-run                     Poll once, log what would happen, don't execute
- *   resume <KEY>                Re-run a ticket from scratch
+ * File: src/index.js
+ * Module: index.js
+ * Purpose: CLI entrypoint that parses commands and starts pipeline execution modes.
+ * Key Exports: No direct exports (internal file).
+ * Integration Points: Integrates with neighboring modules through exported functions.
+ * Data Flow: Keep side effects explicit; keep pure transformations isolated where possible.
+ * Maintenance Notes: Header intentionally documents file intent for fast onboarding and review.
  */
-
 import { loadConfig } from './utils/config.js';
 import { getTicketDetails, parseTicket, displayTicketDetails, searchTickets } from './jira/index.js';
 import { runPipeline } from './pipeline/index.js';
 import { getProviderLabel } from './ai-provider/index.js';
-import { log, warn, err } from './utils/logger.js';
+import { log, err } from './utils/logger.js';
 import * as logger from './utils/logger.js';
+
+const TICKET_SEARCH_FIELDS = ['summary', 'description', 'comment', 'issuetype', 'priority', 'status', 'labels'];
 
 function sleep(seconds) {
   return new Promise((resolve) => setTimeout(resolve, seconds * 1000));
+}
+
+function getTicketQuery(config) {
+  return `labels = "${config.jira.label}" AND statusCategory != Done ORDER BY priority DESC`;
+}
+
+function getTicketSearchFields(config) {
+  return [...TICKET_SEARCH_FIELDS, config.jira.fields.affectedSystems, config.jira.fields.fixVersions];
+}
+
+function requireTicketKey(args, commandName) {
+  const ticketKey = args[1];
+  if (ticketKey) return ticketKey;
+  throw new Error(`Missing ticket key. Usage: ${commandName} <TICKET-KEY>`);
 }
 
 async function runSingle(config, ticketKey) {
@@ -36,9 +50,9 @@ async function runDryRun(config) {
   log('');
 
   try {
-    const jql = `labels = "${config.jira.label}" ORDER BY priority DESC`;
-    const fields = ['summary', 'description', 'comment', 'issuetype', 'priority', 'status', 'labels', config.jira.fields.affectedSystems, config.jira.fields.fixVersions];
-    const tickets = await searchTickets(jql, config.agent.maxTicketsPerCycle, fields);
+    const jql = getTicketQuery(config);
+    const fields = getTicketSearchFields(config);
+    const tickets = await searchTickets(config, jql, config.agent.maxTicketsPerCycle, fields);
 
     if (tickets.length === 0) {
       log('No tickets found matching criteria');
@@ -74,17 +88,16 @@ async function runDaemon(config) {
     cycleCount++;
     try {
       log(`Checking for new patients (cycle ${cycleCount})...`);
-      const jql = `labels = "${config.jira.label}" ORDER BY priority DESC`;
-      const fields = ['summary', 'description', 'comment', 'issuetype', 'priority', 'status', 'labels', config.jira.fields.affectedSystems, config.jira.fields.fixVersions];
-      const tickets = await searchTickets(jql, config.agent.maxTicketsPerCycle, fields);
+      const jql = getTicketQuery(config);
+      const fields = getTicketSearchFields(config);
+      const tickets = await searchTickets(config, jql, config.agent.maxTicketsPerCycle, fields);
 
       if (tickets.length === 0) {
-        log('No patients waiting. Shutting down.');
-        break;
-      }
-
-      for (const ticket of tickets) {
-        await runPipeline(config, ticket);
+        log('No patients waiting in this cycle.');
+      } else {
+        for (const ticket of tickets) {
+          await runPipeline(config, ticket.key);
+        }
       }
     } catch (error) {
       err(`Poll cycle failed: ${error.message}`);
@@ -106,7 +119,6 @@ Commands:
   daemon                      Run the poll loop continuously
   single <KEY>                Process one specific ticket (e.g., single JCP-123)
   dry-run                     Poll once, show ticket details, don't execute
-  resume <KEY>                Re-run a ticket from scratch
 
 Configuration:
   Edit config.json in the project root.
@@ -130,28 +142,13 @@ async function main() {
       break;
 
     case 'single': {
-      const ticketKey = args[1];
-      if (!ticketKey) {
-        err('Missing ticket key. Usage: single <TICKET-KEY>');
-        process.exit(1);
-      }
-      await runSingle(config, ticketKey);
+      await runSingle(config, requireTicketKey(args, 'single'));
       break;
     }
 
     case 'dry-run':
       await runDryRun(config);
       break;
-
-    case 'resume': {
-      const ticketKey = args[1];
-      if (!ticketKey) {
-        err('Missing ticket key. Usage: resume <TICKET-KEY>');
-        process.exit(1);
-      }
-      await runSingle(config, ticketKey);
-      break;
-    }
 
     default:
       err(`Unknown command: ${command}`);

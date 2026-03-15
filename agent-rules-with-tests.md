@@ -48,8 +48,8 @@ Each test run takes minutes of wall-clock time. Minimize runs by analyzing log f
    - `tail -80 /tmp/test-output.log` — test summary (pass/fail counts) is at the end.
    - `grep -n "FAIL\|Error\|AssertionError" /tmp/test-output.log` — find every failure.
    - `grep -B5 "FAIL" /tmp/test-output.log` — get context around failures.
-   - Read specific line ranges with `sed -n '100,150p' /tmp/test-output.log` if you need more context.
-   - Identify **all** failures and their root causes from this single log. Do not fix one and re-run to discover the next.
+   - Read specific line ranges if you need more context.
+   - Identify **all** failures and their root causes from this single log.
 5. **Fix all issues at once** based on your log analysis.
 6. **Run tests again to confirm.** Analyze the new log the same way.
 7. **If still failing:** repeat the analyze-fix-run cycle. You may run tests up to **5 times** total. If tests still fail after 5 runs, stop — note the remaining failures in your summary and move on.
@@ -59,7 +59,6 @@ Each test run takes minutes of wall-clock time. Minimize runs by analyzing log f
 
 ## CRITICAL RESTRICTIONS
 You MUST NOT do any of the following. Violation will cause the entire run to fail:
-- Do NOT run any git commands (git add, git commit, git push, git tag, etc.)
 - Do NOT run deploy-base or any deployment scripts
 - Do NOT create, modify, or push git tags
 - Do NOT modify the FROM line in any Dockerfile
@@ -71,14 +70,12 @@ You ARE allowed to run:
 
 Do NOT manually edit pnpm-lock.yaml or package-lock.json — always use pnpm commands to manage dependencies.
 
-## Sub-Agent Usage
-- Use Task tool to delegate exploration of large files (>500 lines) to keep main context clean
-- Use Task tool for parallel independent file creation when creating multiple modules
-- Use Task tool to isolate test execution output
-- Do NOT use Task tool for simple single-file edits — handle those directly
+## Shipping
+After implementing and verifying, commit and push your changes, then create a PR on Azure DevOps. Exact branch names, commit message, and `az repos pr create` command are provided in the **Ship Instructions** section of your prompt.
 
 ## Output Format
 At the end, output a summary in this format:
 FILES CHANGED: <list of files>
 SUMMARY: <2-3 sentences of what was done>
 RISKS: <anything the reviewer should pay attention to>
+**PR URL:** <full PR URL>

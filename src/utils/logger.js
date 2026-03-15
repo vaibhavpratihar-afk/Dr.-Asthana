@@ -1,13 +1,12 @@
 /**
- * Enhanced logger with file output and run tracking
- *
- * Features:
- * - Console output with colors
- * - File logging organized by date/run
- * - Step tracking with durations
- * - Separate error log file
+ * File: src/utils/logger.js
+ * Module: utils
+ * Purpose: Run-aware logger with console formatting and persistent log file output.
+ * Key Exports: initRun, getRunLogPaths, startStep, endStep, finalizeRun, log, ok, warn ...
+ * Integration Points: Integrates as shared infrastructure across all modules.
+ * Data Flow: Keep side effects explicit; keep pure transformations isolated where possible.
+ * Maintenance Notes: Header intentionally documents file intent for fast onboarding and review.
  */
-
 import fs from 'fs';
 import path from 'path';
 
@@ -123,6 +122,18 @@ function formatConsole(color, prefix, ...args) {
   return [timestamp, stepInfo, coloredPrefix, ...message].filter(Boolean);
 }
 
+function emitLog(level, color, prefix, args, options = {}) {
+  const { isError = false } = options;
+  const message = args.join(' ');
+  const formatted = formatConsole(color, prefix, ...args);
+  if (isError) {
+    console.error(...formatted);
+  } else {
+    console.log(...formatted);
+  }
+  writeToFile(level, message, isError);
+}
+
 export function startStep(stepNumber, stepName) {
   if (currentStep && stepStartTime) {
     const duration = ((Date.now() - stepStartTime) / 1000).toFixed(2);
@@ -191,31 +202,21 @@ export function finalizeRun(success = true, summary = '') {
 }
 
 export function log(...args) {
-  const message = args.join(' ');
-  console.log(...formatConsole(COLORS.blue, '[INFO]', ...args));
-  writeToFile('INFO', message);
+  emitLog('INFO', COLORS.blue, '[INFO]', args);
 }
 
 export function ok(...args) {
-  const message = args.join(' ');
-  console.log(...formatConsole(COLORS.green, '[OK]', ...args));
-  writeToFile('OK', message);
+  emitLog('OK', COLORS.green, '[OK]', args);
 }
 
 export function warn(...args) {
-  const message = args.join(' ');
-  console.log(...formatConsole(COLORS.yellow, '[WARN]', ...args));
-  writeToFile('WARN', message);
+  emitLog('WARN', COLORS.yellow, '[WARN]', args);
 }
 
 export function err(...args) {
-  const message = args.join(' ');
-  console.error(...formatConsole(COLORS.red, '[ERROR]', ...args));
-  writeToFile('ERROR', message, true);
+  emitLog('ERROR', COLORS.red, '[ERROR]', args, { isError: true });
 }
 
 export function debug(...args) {
-  const message = args.join(' ');
-  console.log(...formatConsole(COLORS.gray, '[DEBUG]', ...args));
-  writeToFile('DEBUG', message);
+  emitLog('DEBUG', COLORS.gray, '[DEBUG]', args);
 }

@@ -1,1 +1,1 @@
-export { cloneAndBranch, commitAndPush, cleanup } from './git.js';
+export { cloneAndBranch, cleanup } from './git.js';

@@ -1,6 +1,25 @@
-# Codex Agent Guide
+# Agent Guide
 
 Autonomous engineering agent executing a JIRA ticket in this repository.
+
+## Architecture
+
+Single-agent pipeline — the spawned CLI agent (claude or codex) handles everything end-to-end:
+
+1. Fetch + validate ticket (`src/jira/`)
+2. Clone repo, create feature branch (`src/service/git.js`)
+3. Verify pnpm-lock.yaml exists in repo root
+4. Spawn agent with ticket context + ship instructions (`src/prompt/index.js`)
+5. Agent implements changes, commits, pushes, creates PR on Azure DevOps
+6. Parse PR URL from agent output, notify Slack (`src/notification/`)
+
+## Ticket Validation Rules
+
+A ticket is rejected (with Slack notification) if any of these fail:
+
+- **Single affected system** — `affectedSystems.length === 1`
+- **Single fix version** — `targetBranches.length === 1` and `targetBranch` exists
+- **pnpm project** — `pnpm-lock.yaml` present in repo root after clone
 
 ## Working Contract
 
@@ -21,18 +40,14 @@ Autonomous engineering agent executing a JIRA ticket in this repository.
 ## Making Changes
 
 1. Read the files you will modify before editing them.
-2. Run the relevant test commands from `package.json` scripts after making changes.
-3. Run a linter if one is configured (`pnpm lint` or similar).
-4. Fix any failures before finishing — do not leave broken tests or lint errors.
+2. Fix any failures before finishing — do not leave broken tests or lint errors.
 
 ## Verification
 
 After implementing, verify:
 - Changes match the ticket's stated requirements exactly.
 - No unintended files were modified.
-- Tests pass.
-- No new lint errors.
 
-## Git
+## Shipping
 
-Do not commit. The pipeline handles commits after review.
+After implementing and verifying, commit and push your changes, then create a PR on Azure DevOps. Exact branch names, commit message, and `az repos pr create` command will be provided in the **Ship Instructions** section of your prompt.

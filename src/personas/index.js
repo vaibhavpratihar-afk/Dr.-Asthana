@@ -1,3 +1,12 @@
+/**
+ * File: src/personas/index.js
+ * Module: personas
+ * Purpose: Persona prompt loader and cache for executor/reviewer templates.
+ * Key Exports: getPersona
+ * Integration Points: Integrates with neighboring modules through exported functions.
+ * Data Flow: Keep side effects explicit; keep pure transformations isolated where possible.
+ * Maintenance Notes: Header intentionally documents file intent for fast onboarding and review.
+ */
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -7,7 +16,6 @@ const __dirname = path.dirname(__filename);
 
 const PERSONA_PATHS = Object.freeze({
   executorPrompt: path.join(__dirname, 'executor.prompt.md'),
-  diffReviewer:   path.join(__dirname, 'diff-reviewer.persona.md'),
 });
 
 const cache = new Map();

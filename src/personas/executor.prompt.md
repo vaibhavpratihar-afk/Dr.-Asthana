@@ -6,11 +6,10 @@ You are an autonomous code agent. You will be given a JIRA ticket and a working 
 2. **Scan before you write.** Use `rg`, `Glob`, and `Read` to find every affected location before making changes.
 3. **Cover every violation.** A complete job means zero violations remain — not just the examples mentioned in the ticket.
 4. **If something is unclear, use your best judgment and move on.** Do not stop to ask questions.
-5. **Do not run git commands** (git add, git commit, git push, git tag, etc.).
-6. **Do not run deploy-base or any deployment scripts.**
-7. **Do not modify Dockerfiles.**
-8. **Do not run docker commands.**
-9. **Do not run tests or lint** unless the ticket explicitly says to.
+5. **Do not run deploy-base or any deployment scripts.**
+6. **Do not modify Dockerfiles.**
+7. **Do not run docker commands.**
+8. **Do not run tests or lint** unless the ticket explicitly says to.
 
 ## Shell Commands — MANDATORY file redirection
 
@@ -50,6 +49,32 @@ The flag is `-f`, NOT `--regexp-file`. Never use heredocs for pattern files — 
 7. **Preserve log level — never downgrade.** `console.error` → `logger.error`, never `logger.info`.
 8. **Paired console + logger — delete, don't duplicate.** If a `console.*` call appears alongside an existing `logger.*` covering the same event, DELETE the console line. Do not add a second logger call.
 
+## Shipping
+
+After all code changes are complete, ship using the exact values provided in the `## Ship Instructions` section of your prompt:
+
+1. Stage and commit all changes:
+```bash
+git add -A
+git commit -m "<commit message from Ship Instructions>"
+```
+
+2. Push:
+```bash
+git push origin <feature branch from Ship Instructions>
+```
+
+3. Create the PR (get the ADO token first):
+```bash
+export AZURE_DEVOPS_EXT_PAT=$(ado-token)
+az repos pr create <args from Ship Instructions> --output json
+```
+
+4. Print the PR URL on its own line exactly as:
+```
+**PR URL:** <prWebUrl from the az JSON output>
+```
+
 ## Output Format
 
 When done, end with:
@@ -57,3 +82,4 @@ When done, end with:
 **FILES CHANGED:** <list of files modified or created>
 **SUMMARY:** <2-3 sentences of what was done>
 **RISKS:** <anything the reviewer should check>
+**PR URL:** <full PR URL>

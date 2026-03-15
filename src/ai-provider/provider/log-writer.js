@@ -1,10 +1,12 @@
 /**
- * Provider log writer.
- *
- * Persists prompt snapshots and run summaries to artifact and/or fallback log
- * directories without affecting execution flow when logging fails.
+ * File: src/ai-provider/provider/log-writer.js
+ * Module: ai-provider
+ * Purpose: Module implementation for domain-specific behavior in this subsystem.
+ * Key Exports: writePromptFile, writeLogFile
+ * Integration Points: Integrates with provider CLIs and pipeline prompt execution flow.
+ * Data Flow: Keep side effects explicit; keep pure transformations isolated where possible.
+ * Maintenance Notes: Header intentionally documents file intent for fast onboarding and review.
  */
-
 import fs from 'fs';
 import path from 'path';
 import { log, warn } from '../../utils/logger.js';
