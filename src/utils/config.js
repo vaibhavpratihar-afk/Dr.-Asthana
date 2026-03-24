@@ -1,16 +1,22 @@
 /**
- * Configuration loader and validator.
- *
- * Reads config.json from project root, validates required fields,
- * returns a structured config object matching the v2 schema.
+ * File: src/utils/config.js
+ * Module: utils
+ * Purpose: Configuration loader with normalization and validation rules.
+ * Key Exports: loadConfig, getAuthHeader, getRepoUrl, getServiceConfig
+ * Integration Points: Integrates as shared infrastructure across all modules.
+ * Data Flow: Keep side effects explicit; keep pure transformations isolated where possible.
+ * Maintenance Notes: Header intentionally documents file intent for fast onboarding and review.
  */
-
 import fs from 'fs';
 import path from 'path';
 
 const CONFIG_PATH = path.join(process.cwd(), 'config.json');
+const DEFAULT_FIELDS = {
+  affectedSystems: 'customfield_10056',
+  fixVersions: 'fixVersions',
+};
 
-const REQUIRED_FIELDS = [
+const REQUIRED_FIELDS = Object.freeze([
   'jira.baseUrl',
   'jira.email',
   'jira.apiToken',
@@ -18,49 +24,69 @@ const REQUIRED_FIELDS = [
   'azureDevOps.org',
   'azureDevOps.project',
   'azureDevOps.repoBaseUrl',
-];
+]);
+
+const NUMERIC_DEFAULTS = Object.freeze({
+  jiraMaxComments: 100,
+  pollInterval: 300,
+  maxTicketsPerCycle: 1,
+});
 
 function getNestedValue(obj, dotPath) {
   return dotPath.split('.').reduce((acc, part) => acc?.[part], obj);
 }
 
+function collectMissingRequiredFields(rawConfig) {
+  const missing = [];
+  for (let index = 0; index < REQUIRED_FIELDS.length; index += 1) {
+    const field = REQUIRED_FIELDS[index];
+    const value = getNestedValue(rawConfig, field);
+    if (!value || value === '') {
+      missing.push(field);
+    }
+  }
+  return missing;
+}
+
+function toPositiveInteger(value, fallback) {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+export class ConfigError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'ConfigError';
+  }
+}
+
 export function loadConfig() {
   if (!fs.existsSync(CONFIG_PATH)) {
-    console.error(`Config file not found: ${CONFIG_PATH}`);
-    process.exit(1);
+    throw new ConfigError(`Config file not found: ${CONFIG_PATH}`);
   }
 
   let raw;
   try {
     raw = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8'));
   } catch (e) {
-    console.error(`Failed to parse config.json: ${e.message}`);
-    process.exit(1);
+    throw new ConfigError(`Failed to parse config.json: ${e.message}`);
   }
 
-  const missing = REQUIRED_FIELDS.filter(f => {
-    const v = getNestedValue(raw, f);
-    return !v || v === '';
-  });
+  const missing = collectMissingRequiredFields(raw);
   if (missing.length > 0) {
-    console.error('Missing required configuration fields:');
-    missing.forEach(f => console.error(`  - ${f}`));
-    process.exit(1);
+    throw new ConfigError(`Missing required configuration fields: ${missing.join(', ')}`);
   }
 
   // Build structured config
+  const jiraFields = { ...DEFAULT_FIELDS, ...(raw.jira.fields || {}) };
   const config = {
     jira: {
       baseUrl: raw.jira.baseUrl.replace(/\/$/, ''),
       email: raw.jira.email,
       apiToken: raw.jira.apiToken,
       label: raw.jira.label,
-      labelProcessed: raw.jira.labelProcessed || `${raw.jira.label}-done`,
-      maxComments: raw.jira?.maxComments || 100,
-      fields: raw.jira.fields || {
-        affectedSystems: 'customfield_10056',
-        fixVersions: 'fixVersions',
-      },
+      maxComments: toPositiveInteger(raw.jira?.maxComments, NUMERIC_DEFAULTS.jiraMaxComments),
+      fields: jiraFields,
     },
     azureDevOps: {
       org: raw.azureDevOps.org,
@@ -73,101 +99,37 @@ export function loadConfig() {
       userId: raw.slack?.userId || null,
     },
     agent: {
-      pollInterval: raw.agent?.pollInterval || 300,
-      maxTicketsPerCycle: raw.agent?.maxTicketsPerCycle || 1,
+      pollInterval: toPositiveInteger(raw.agent?.pollInterval, NUMERIC_DEFAULTS.pollInterval),
+      maxTicketsPerCycle: toPositiveInteger(raw.agent?.maxTicketsPerCycle, NUMERIC_DEFAULTS.maxTicketsPerCycle),
       logDir: raw.agent?.logDir || './logs',
-      executionRetries: raw.agent?.executionRetries ?? 1,
     },
-    council: buildCouncilConfig(raw),
-    prReviewCouncil: buildPrReviewCouncilConfig(raw),
     aiProvider: buildAiProviderConfig(raw),
-    infra: {
-      enabled: raw.infra?.enabled ?? false,
-      scriptsDir: raw.infra?.scriptsDir || '',
-      stopAfterProcessing: raw.infra?.stopAfterProcessing ?? false,
-    },
-    tests: {
-      enabled: raw.tests?.enabled ?? false,
-    },
   };
 
   return config;
 }
 
-function buildModeConfig(modeRaw, defaults) {
-  const { claudeModel, claudeMaxTurns, claudeTimeout, codexTimeout, allowedTools } = defaults;
-  return {
-    provider: modeRaw?.provider || 'claude',
-    fallbackProvider: modeRaw?.fallbackProvider || null,
-    allowedTools: modeRaw?.allowedTools || modeRaw?.claude?.allowedTools || allowedTools,
-    claude: {
-      model: modeRaw?.claude?.model || claudeModel,
-      maxTurns: modeRaw?.claude?.maxTurns || claudeMaxTurns,
-      timeoutMinutes: modeRaw?.claude?.timeoutMinutes || claudeTimeout,
-      allowedTools: modeRaw?.claude?.allowedTools || allowedTools,
-    },
-    codex: {
-      model: modeRaw?.codex?.model || null,
-      timeoutMinutes: modeRaw?.codex?.timeoutMinutes || codexTimeout,
-    },
-  };
-}
-
-function buildCouncilConfig(raw) {
-  return buildCouncilConfigSection(raw.council || {});
-}
-
-function buildPrReviewCouncilConfig(raw) {
-  if (!raw.prReviewCouncil) return null;
-  return buildCouncilConfigSection(raw.prReviewCouncil);
-}
-
-function buildCouncilConfigSection(councilRaw = {}) {
-  const normalizeMember = (member, defaults) => ({
-    provider: member?.provider || defaults.provider,
-    model: member?.model || defaults.model,
-    maxTurns: member?.maxTurns || defaults.maxTurns,
-    timeoutMinutes: member?.timeoutMinutes || defaults.timeoutMinutes,
-    allowedTools: member?.allowedTools || defaults.allowedTools,
-  });
-  const debateDefaults = {
-    provider: 'claude',
-    model: 'sonnet',
-    maxTurns: 15,
-    timeoutMinutes: 10,
-    allowedTools: 'Read,Glob,Grep',
-  };
-  const evaluateDefaults = {
-    provider: 'claude',
-    model: 'sonnet',
-    maxTurns: 5,
-    timeoutMinutes: 5,
-    allowedTools: 'Read,Glob,Grep',
-  };
-  const proposer = normalizeMember(councilRaw.proposer, debateDefaults);
-  const critics = Array.isArray(councilRaw.critics) && councilRaw.critics.length > 0
-    ? councilRaw.critics.map((critic) => normalizeMember(critic, debateDefaults))
-    : [normalizeMember(null, debateDefaults)];
-  const evaluator = normalizeMember(councilRaw.evaluator, evaluateDefaults);
-  return {
-    maxRounds: councilRaw.maxRounds || 3,
-    proposer,
-    critics,
-    evaluator,
-  };
-}
-
 function buildAiProviderConfig(raw) {
   const ai = raw.aiProvider || {};
+  const execute = ai.execute || {};
+  const provider = execute.provider;
+  if (!provider) {
+    throw new ConfigError('Missing required configuration field: aiProvider.execute.provider');
+  }
+  const providerConfig = execute[provider];
+  if (!providerConfig || typeof providerConfig !== 'object') {
+    throw new ConfigError(`Missing provider section for aiProvider.execute.${provider}`);
+  }
+  if (!providerConfig.command) {
+    throw new ConfigError(`Missing required configuration field: aiProvider.execute.${provider}.command`);
+  }
 
-  const execute = {
-    ...buildModeConfig(ai.execute, {
-      claudeModel: 'haiku', claudeMaxTurns: 30, claudeTimeout: 15,
-      codexTimeout: 15, allowedTools: 'Read,Write,Edit,Bash,Glob,Grep',
-    }),
+  return {
+    execute: {
+      provider,
+      [provider]: { ...providerConfig },
+    },
   };
-
-  return { strategy: ai.strategy || 'single', execute };
 }
 
 /**
@@ -191,28 +153,20 @@ export function getRepoUrl(config, serviceName) {
  * Get service config by name (case-insensitive)
  */
 export function getServiceConfig(config, serviceName) {
+  if (!serviceName || typeof serviceName !== 'string') {
+    return null;
+  }
+
   if (config.services[serviceName]) {
     return { name: serviceName, ...config.services[serviceName] };
   }
   const lowerName = serviceName.toLowerCase();
-  for (const [name, svc] of Object.entries(config.services)) {
+  const serviceEntries = Object.entries(config.services);
+  for (let index = 0; index < serviceEntries.length; index += 1) {
+    const [name, svc] = serviceEntries[index];
     if (name.toLowerCase() === lowerName) {
       return { name, ...svc };
     }
   }
   return null;
-}
-
-/**
- * Return a shallow config clone with the requested council profile.
- *
- * Useful when a caller needs to run council logic with an alternate
- * proposer/critic/evaluator setup (e.g. PR review council).
- */
-export function withCouncilConfig(config, councilOverride) {
-  if (!councilOverride) return config;
-  return {
-    ...config,
-    council: councilOverride,
-  };
 }

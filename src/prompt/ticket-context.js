@@ -1,5 +1,11 @@
 /**
- * Builds prompt section from JIRA ticket data.
+ * File: src/prompt/ticket-context.js
+ * Module: prompt
+ * Purpose: Ticket context builder that shapes Jira details into full prompt text.
+ * Key Exports: buildTicketContext
+ * Integration Points: Integrates with ticket/parser data and AI provider execution APIs.
+ * Data Flow: Keep side effects explicit; keep pure transformations isolated where possible.
+ * Maintenance Notes: Header intentionally documents file intent for fast onboarding and review.
  */
 
 /**
@@ -27,7 +33,7 @@ export function buildTicketContext(ticketData) {
     for (let i = 0; i < ticketData.comments.length; i++) {
       const c = ticketData.comments[i];
       lines.push(`### Comment ${i + 1} by ${c.author}`);
-      lines.push(c.text);
+      lines.push(c.text || '');
       lines.push('');
     }
   }

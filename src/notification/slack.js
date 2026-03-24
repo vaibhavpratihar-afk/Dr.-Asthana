@@ -1,9 +1,25 @@
 /**
- * Slack integration.
- * Uses @slack/web-api WebClient. Builds Block Kit messages.
+ * File: src/notification/slack.js
+ * Module: notification
+ * Purpose: Slack DM transport wrapper with fallback behavior.
+ * Key Exports: sendDM
+ * Integration Points: Integrates with Jira comment APIs and Slack transport.
+ * Data Flow: Keep side effects explicit; keep pure transformations isolated where possible.
+ * Maintenance Notes: Header intentionally documents file intent for fast onboarding and review.
  */
-
 import { log, warn, err } from '../utils/logger.js';
+let slackClient = null;
+
+function hasSlackConfig(config) {
+  return Boolean(config?.slack?.botToken && config?.slack?.userId);
+}
+
+async function getSlackClient(botToken) {
+  if (slackClient) return slackClient;
+  const { WebClient } = await import('@slack/web-api');
+  slackClient = new WebClient(botToken);
+  return slackClient;
+}
 
 /**
  * Send a Slack DM using Block Kit.
@@ -13,17 +29,19 @@ import { log, warn, err } from '../utils/logger.js';
  * @param {string} fallbackText - Fallback text for notifications
  */
 export async function sendDM(config, blocks, fallbackText) {
-  if (!config.slack.botToken || !config.slack.userId) {
+  if (!hasSlackConfig(config)) {
     warn('Slack not configured, skipping notification');
     return;
   }
 
   try {
-    const { WebClient } = await import('@slack/web-api');
-    const client = new WebClient(config.slack.botToken);
+    const client = await getSlackClient(config.slack.botToken);
 
     const conversation = await client.conversations.open({ users: config.slack.userId });
-    const dmChannelId = conversation.channel.id;
+    const dmChannelId = conversation.channel?.id;
+    if (!dmChannelId) {
+      throw new Error('Could not resolve DM channel ID from Slack conversations.open');
+    }
 
     try {
       await client.chat.postMessage({

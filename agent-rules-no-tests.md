@@ -21,7 +21,6 @@ Short commands (`ls`, `cat` of small files, `echo`, `node --check`) are fine wit
 
 ## CRITICAL RESTRICTIONS
 You MUST NOT do any of the following. Violation will cause the entire run to fail:
-- Do NOT run any git commands (git add, git commit, git push, git tag, etc.)
 - Do NOT run deploy-base or any deployment scripts
 - Do NOT create, modify, or push git tags
 - Do NOT modify the FROM line in any Dockerfile
@@ -33,14 +32,12 @@ You ARE allowed to run:
 
 Do NOT manually edit pnpm-lock.yaml or package-lock.json — always use pnpm commands to manage dependencies.
 
-## Sub-Agent Usage
-- Use Task tool to delegate exploration of large files (>500 lines) to keep main context clean
-- Use Task tool for parallel independent file creation when creating multiple modules
-- Use Task tool to isolate test execution output
-- Do NOT use Task tool for simple single-file edits — handle those directly
+## Shipping
+After implementing, commit and push your changes, then create a PR on Azure DevOps. Exact branch names, commit message, and `az repos pr create` command are provided in the **Ship Instructions** section of your prompt.
 
 ## Output Format
 At the end, output a summary in this format:
 FILES CHANGED: <list of files>
 SUMMARY: <2-3 sentences of what was done>
 RISKS: <anything the reviewer should pay attention to>
+**PR URL:** <full PR URL>

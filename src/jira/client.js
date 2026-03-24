@@ -1,23 +1,28 @@
 /**
- * Low-level JIRA REST API wrapper.
- * All functions take (config, ...) as first arg.
+ * File: src/jira/client.js
+ * Module: jira
+ * Purpose: Direct Jira REST client operations for read-only ticket retrieval.
+ * Key Exports: searchTickets, getTicketDetails
+ * Integration Points: Integrates with Jira APIs/CLI and pipeline-facing parsers/validators.
+ * Data Flow: Keep side effects explicit; keep pure transformations isolated where possible.
+ * Maintenance Notes: Header intentionally documents file intent for fast onboarding and review.
  */
-
 import { getAuthHeader } from '../utils/config.js';
 import { log, warn } from '../utils/logger.js';
 
-/**
- * Fetch JSON from JIRA REST API
- */
-export async function fetchJSON(config, url, options = {}) {
+function buildJiraHeaders(config, extraHeaders = {}) {
+  return {
+    Authorization: getAuthHeader(config),
+    Accept: 'application/json',
+    ...extraHeaders,
+  };
+}
+
+async function fetchJSON(config, url, options = {}) {
   const response = await fetch(url, {
     method: 'GET',
     ...options,
-    headers: {
-      Authorization: getAuthHeader(config),
-      Accept: 'application/json',
-      ...options.headers,
-    },
+    headers: buildJiraHeaders(config, options.headers),
   });
 
   if (!response.ok) {
@@ -28,31 +33,21 @@ export async function fetchJSON(config, url, options = {}) {
   return response.json();
 }
 
+function buildSearchUrl(config, jql, maxResults, fields) {
+  const params = new URLSearchParams();
+  params.set('jql', jql);
+  params.set('maxResults', String(maxResults));
+  params.set('fields', fields.join(','));
+  return `${config.jira.baseUrl}/rest/api/3/search/jql?${params.toString()}`;
+}
+
 /**
- * POST JSON to JIRA REST API
+ * Search Jira tickets with JQL using read-only REST API.
  */
-export async function postJSON(config, url, body) {
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      Authorization: getAuthHeader(config),
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    },
-    body: JSON.stringify(body),
-  });
-
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`JIRA API POST ${response.status}: ${text}`);
-  }
-
-  // Some endpoints return 204 with no body
-  const contentType = response.headers.get('content-type');
-  if (contentType && contentType.includes('application/json')) {
-    return response.json();
-  }
-  return null;
+export async function searchTickets(config, jql, maxResults, fields) {
+  const url = buildSearchUrl(config, jql, maxResults, fields);
+  const data = await fetchJSON(config, url);
+  return Array.isArray(data.issues) ? data.issues : [];
 }
 
 /**
@@ -99,17 +94,4 @@ export async function getTicketDetails(config, ticketKey) {
   }
 
   return ticket;
-}
-
-/**
- * Get the current status name of a ticket
- */
-export async function getTicketStatus(config, ticketKey) {
-  try {
-    const url = `${config.jira.baseUrl}/rest/api/3/issue/${ticketKey}?fields=status`;
-    const data = await fetchJSON(config, url);
-    return data.fields?.status?.name || null;
-  } catch {
-    return null;
-  }
 }

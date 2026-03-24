@@ -54,6 +54,9 @@
   },
   "council": {
     "maxRounds": 3,
+    "failClosed": true,
+    "forceOnLastRound": false,
+    "forceBestEffortOnMaxRounds": false,
     "proposer": {
       "provider": "claude",
       "model": "sonnet",
@@ -68,32 +71,11 @@
         "maxTurns": 15,
         "timeoutMinutes": 10,
         "allowedTools": "Read,Glob,Grep"
-      }
-    ],
-    "evaluator": {
-      "provider": "claude",
-      "model": "sonnet",
-      "maxTurns": 5,
-      "timeoutMinutes": 5,
-      "allowedTools": "Read,Glob,Grep"
-    }
-  },
-  "prReviewCouncil": {
-    "maxRounds": 2,
-    "proposer": {
-      "provider": "claude",
-      "model": "sonnet",
-      "maxTurns": 10,
-      "timeoutMinutes": 8,
-      "allowedTools": "Read,Glob,Grep"
-    },
-    "critics": [
+      },
       {
-        "provider": "claude",
-        "model": "sonnet",
-        "maxTurns": 10,
-        "timeoutMinutes": 8,
-        "allowedTools": "Read,Glob,Grep"
+        "provider": "codex",
+        "model": "gpt-5.3-codex",
+        "timeoutMinutes": 10
       }
     ],
     "evaluator": {
