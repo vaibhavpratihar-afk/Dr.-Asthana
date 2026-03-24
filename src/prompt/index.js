@@ -69,10 +69,13 @@ export async function execute(ticket, cloneDir, config, options = {}) {
     providerConfig,
   });
 
-  if (!result.output) {
+  if (!result.output && !result.fullText) {
     return { status: 'failed', reason: 'Executor produced no output' };
   }
 
-  log(`Executor done (${result.output.length} chars)`);
-  return { status: 'done', output: result.output };
+  log(`Executor done (${result.output.length} chars, fullText=${result.fullText.length} chars)`);
+  // Use fullText (all assistant turns concatenated) so PR URL can be found even if
+  // it was printed in an earlier turn rather than the final result.
+  const output = result.fullText || result.output;
+  return { status: 'done', output };
 }

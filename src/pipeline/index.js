@@ -6,6 +6,7 @@ import {
   buildArtifactPhase,
   publishOutcomePhase,
   notifyFailurePhase,
+  notifyBailoutPhase,
 } from './phases.js';
 import * as logger from '../utils/logger.js';
 
@@ -57,6 +58,14 @@ export async function runPipeline(config, ticketOrKey) {
     } catch (branchError) {
       err(`Failed to process ${serviceTarget.serviceName}/${serviceTarget.baseBranch}: ${branchError.message}`);
       branchResult = { pr: null, error: branchError.message };
+    }
+
+    // Agent determined it cannot complete without human intervention
+    if (branchResult.bailout) {
+      const artifactUrl = await buildArtifactPhase({ ticketKey, artifactDir, logger });
+      await notifyBailoutPhase({ config, ticketKey, ticket, bailout: branchResult.bailout, artifactUrl, logger });
+      finalizeOnce(false, `Bailout: ${branchResult.bailout.reason}`);
+      return { success: false, reason: 'bailout', bailout: branchResult.bailout };
     }
 
     const prs = branchResult.pr ? [{ service: serviceTarget.serviceName, ...branchResult.pr }] : [];

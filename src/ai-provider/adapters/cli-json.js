@@ -16,20 +16,25 @@ export function buildArgs(prompt, modeConfig) {
 }
 
 function buildClaudeArgs(prompt, modeConfig) {
-  const args = ['--print', prompt, '--output-format', 'stream-json', '--verbose', '--dangerously-skip-permissions'];
+  const args = ['-p', prompt, '--output-format', 'stream-json', '--verbose', '--dangerously-skip-permissions'];
   if (modeConfig.model) args.push('--model', modeConfig.model);
+  if (modeConfig.maxTurns) args.push('--max-turns', String(modeConfig.maxTurns));
   return { args };
 }
 
 function buildCodexArgs(prompt, modeConfig) {
-  const flags = ['--json', '--full-auto'];
+  const flags = [
+    '--json',
+    '--dangerously-bypass-approvals-and-sandbox',
+  ];
   if (modeConfig.model) flags.push('--model', modeConfig.model);
   return { args: ['exec', ...flags, prompt] };
 }
 
 export function parseStreamOutput(rawStdout, exitCode) {
   let sessionId = null;
-  let lastItemText = '';
+  const textBlocks = [];
+  let resultText = '';
   let hasStructuredEvents = false;
 
   const lines = (rawStdout || '').split('\n');
@@ -50,9 +55,18 @@ export function parseStreamOutput(rawStdout, exitCode) {
       sessionId = event.thread_id;
     }
 
-    // Claude Code stream-json: final result
+    // Claude Code stream-json: final result (contains last assistant text)
     if (event.type === 'result' && event.result) {
-      lastItemText = event.result;
+      resultText = event.result;
+    }
+
+    // Agentic mode: collect assistant text from every turn
+    if (event.type === 'assistant' && event.message?.content) {
+      for (const block of event.message.content) {
+        if (block.type === 'text' && block.text) {
+          textBlocks.push(block.text);
+        }
+      }
     }
 
     if (event.type === 'item.completed' && event.item) {
@@ -60,21 +74,24 @@ export function parseStreamOutput(rawStdout, exitCode) {
       if (item.type === 'message' && Array.isArray(item.content)) {
         for (const block of item.content) {
           if (block.type === 'output_text' || block.type === 'text') {
-            lastItemText = block.text || block.value || lastItemText;
+            const t = block.text || block.value || '';
+            if (t) textBlocks.push(t);
           }
         }
       }
       if (item.type === 'agent_message' && item.text) {
-        lastItemText = item.text;
+        textBlocks.push(item.text);
       }
     }
   }
 
-  let output = hasStructuredEvents ? lastItemText : (rawStdout || '');
-  if (!output && exitCode !== 0) {
-    output = rawStdout || '';
-  }
-  return { output, sessionId };
+  // Combine all assistant text so PR URL / output markers can be found across turns
+  const allText = textBlocks.join('\n');
+  let output = resultText || allText || '';
+  if (!output && !hasStructuredEvents) output = rawStdout || '';
+  if (!output && exitCode !== 0) output = rawStdout || '';
+
+  return { output, sessionId, fullText: allText };
 }
 
 export function getCommand(modeConfig) {

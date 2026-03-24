@@ -66,9 +66,29 @@ async function runExecuteStep(context) {
     return stepFail(execResult.reason);
   }
 
+  const bailout = parseBailoutFromOutput(execResult.output);
+  if (bailout) {
+    warn(`Executor bailed out: ${bailout.reason}`);
+    endStep(false, `Bailout: ${bailout.reason}`);
+    return stepFail(bailout.reason, { bailout });
+  }
+
   const pr = parsePrFromOutput(execResult.output, serviceTarget.baseBranch);
   endStep(true, pr ? `PR created: ${pr.prUrl}` : 'Execution complete (no PR URL found in output)');
   return stepOk({ pr });
+}
+
+function parseBailoutFromOutput(output) {
+  if (!output) return null;
+  const reasonMatch = output.match(/\*\*BAILOUT:\*\*\s*(.+)/);
+  if (!reasonMatch) return null;
+  const exploredMatch = output.match(/\*\*EXPLORED:\*\*\s*(.+)/);
+  const suggestionMatch = output.match(/\*\*SUGGESTION:\*\*\s*(.+)/);
+  return {
+    reason: reasonMatch[1].trim(),
+    explored: exploredMatch ? exploredMatch[1].trim() : null,
+    suggestion: suggestionMatch ? suggestionMatch[1].trim() : null,
+  };
 }
 
 function parsePrFromOutput(output, baseBranch) {

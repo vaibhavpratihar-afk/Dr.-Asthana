@@ -32,7 +32,7 @@ export async function processServiceBranchPhase({ config, ticket, serviceTarget,
           }
           break;
         case STEP_STATUS.FAIL:
-          return { pr: null, error: outcome.error };
+          return { pr: null, error: outcome.error, bailout: outcome.bailout || null };
         default:
           throw new Error(`Unknown service step outcome: ${outcome.status}`);
       }

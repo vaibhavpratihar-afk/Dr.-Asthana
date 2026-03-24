@@ -47,6 +47,28 @@ export function buildFinalReport(config, allPRs, allFailures, artifactUrl) {
   return blocks;
 }
 
+export function buildBailoutReport(ticketKey, summary, bailout, artifactUrl) {
+  const blocks = [
+    { type: 'header', text: { type: 'plain_text', text: 'Needs human intervention', emoji: true } },
+    { type: 'section', text: { type: 'mrkdwn', text: sanitizeForSlack(`*${ticketKey}* — ${summary}`) } },
+    { type: 'section', text: { type: 'mrkdwn', text: sanitizeForSlack(`*Why:* ${bailout.reason}`) } },
+  ];
+
+  if (bailout.explored) {
+    blocks.push({ type: 'section', text: { type: 'mrkdwn', text: sanitizeForSlack(`*Explored:* ${bailout.explored}`) } });
+  }
+  if (bailout.suggestion) {
+    blocks.push({ type: 'section', text: { type: 'mrkdwn', text: sanitizeForSlack(`*Suggestion:* ${bailout.suggestion}`) } });
+  }
+
+  const footerParts = [];
+  if (artifactUrl) footerParts.push(`<${artifactUrl}|Full report>`);
+  footerParts.push('_Agent explored the codebase and determined this needs a human_');
+  blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: joinContextParts(footerParts) }] });
+
+  return blocks;
+}
+
 export function buildFailureReport(error, step, ticketData, artifactUrl) {
   const errorMsg = typeof error === 'string' ? error : error?.message || 'Unknown error';
   const briefError = safeTruncate(errorMsg, FAILURE_MESSAGE_LIMIT);

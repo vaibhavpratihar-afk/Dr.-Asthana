@@ -31,6 +31,7 @@ export async function runAI(options) {
 
   const result = {
     output: parsed?.output || '',
+    fullText: parsed?.fullText || '',
     exitCode: typeof raw.exitCode === 'number' ? raw.exitCode : 1,
     provider: providerName,
     duration: Number.isFinite(raw.duration) ? raw.duration : 0,

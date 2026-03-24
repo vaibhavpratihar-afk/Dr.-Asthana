@@ -38,7 +38,7 @@ function buildSearchUrl(config, jql, maxResults, fields) {
   params.set('jql', jql);
   params.set('maxResults', String(maxResults));
   params.set('fields', fields.join(','));
-  return `${config.jira.baseUrl}/rest/api/3/search?${params.toString()}`;
+  return `${config.jira.baseUrl}/rest/api/3/search/jql?${params.toString()}`;
 }
 
 /**

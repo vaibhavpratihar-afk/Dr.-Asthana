@@ -24,10 +24,8 @@ export function spawnRuntime({ command, args, workingDir, label, logDir, ticketK
     const proc = nodeSpawn(command, args, {
       cwd: workingDir,
       env: { ...process.env },
-      stdio: ['pipe', 'pipe', 'pipe'],
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
-
-    proc.stdin.end();
     log(`[${label}] Process spawned (PID: ${proc.pid})`);
 
     proc.stdout.on('data', (data) => {

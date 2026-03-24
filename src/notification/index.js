@@ -1,5 +1,5 @@
 import { sendDM } from './slack.js';
-import { buildFinalReport, buildFailureReport } from './report.js';
+import { buildFinalReport, buildFailureReport, buildBailoutReport } from './report.js';
 
 export async function notifySlackSuccess(config, ticketKey, summary, allPRs, allFailures, artifactUrl) {
   const report = buildFinalReport(config, allPRs, allFailures, artifactUrl);
@@ -12,6 +12,11 @@ export async function notifySlackSuccess(config, ticketKey, summary, allPRs, all
   };
   const blocks = [...report.slice(0, 1), ticketBlock, ...report.slice(1)];
   await sendDM(config, blocks, `${allPRs.length} PR(s) created for ${ticketKey}`);
+}
+
+export async function notifySlackBailout(config, ticketKey, ticket, bailout, artifactUrl) {
+  const blocks = buildBailoutReport(ticketKey, ticket.summary, bailout, artifactUrl);
+  await sendDM(config, blocks, `Needs human: ${ticketKey} — ${bailout.reason}`);
 }
 
 export async function notifySlackFailure(config, ticketKey, ticketData, error, artifactUrl) {
