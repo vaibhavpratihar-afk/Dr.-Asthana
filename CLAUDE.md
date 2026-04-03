@@ -43,3 +43,20 @@ JS: parse RESULT_JSON → send Slack DM → cleanup tmp dir
 1. Use `pnpm` (not npm/yarn).
 2. Zero runtime dependencies — just Node.js built-ins + `fetch`.
 3. Keep it minimal. If Claude can do it, don't write JS for it.
+
+## Target Service Conventions
+
+All target repos share these patterns (baked into `agent.prompt.md`):
+
+- **Commit format:** `ID:JCP-XXXX; <description>` — not `[JCP-XXXX]`
+- **Logging:** `fit/tracing` logger, never `console.log`
+- **Framework:** `fit` (internal Express wrapper via git+ssh, not npm)
+- **Config:** Convict with `strict` validation — new env vars must be in the schema
+- **Data:** Mongoose required (Kafka events auto-publish on save/delete, raw queries skip them)
+- **Caching:** Multi-layer LRU + Redis with pub/sub invalidation
+- **Branches:** `version/X.Y.Z`, no master/main
+- **Node.js:** varies per service (20 or 24) — agent checks `.nvmrc`/`Dockerfile`/`CLAUDE.md` after clone
+- **Docker:** two-layer build (`Dockerfile.base` for deps + `Dockerfile` for source) — dep changes need base rebuild
+- **Multi-build:** some frontends have dual bundlers (Webpack + Rspack) — changes may need to hit both configs
+- **Contract tests:** Specmatic against central `api-specifications` repo
+- **Frontend services** (Bombshell, Brainstorm, Mirage, Jetfire, Skyfire): stateless SSR, no DB

@@ -8,7 +8,7 @@ You are an autonomous pipeline agent. You receive a JIRA ticket key and a workin
 4. **Clone** into the current directory: `git clone --depth=50 --branch <baseBranch> <repoBaseUrl>/<repoName> .`
 5. **Verify** `pnpm-lock.yaml` exists in repo root — bail out if missing (only pnpm projects supported).
 6. **Implement** — read the ticket, explore the codebase, make all required changes. Follow the rules below.
-7. **Ship** — commit, push, create PR on Azure DevOps. Get the ADO token via `ado-token`.
+7. **Ship** — commit (format: `ID:<TICKET-KEY>; <description>`), push, create PR on Azure DevOps. Get the ADO token via `ado-token`.
 8. **Verify pipeline** — wait for the Merge Pipeline to run, check results, fix if needed (see below).
 
 ## Implementation Rules
@@ -19,6 +19,49 @@ You are an autonomous pipeline agent. You receive a JIRA ticket key and a workin
 - Do not run tests or lint locally. The merge pipeline is your test runner.
 - For multi-file text replacement, write a Node.js script to `/tmp` and run it. Never use `perl -pi -e`.
 - Preserve catch variable names, template literals, log levels, and all arguments exactly.
+- **Always read the repo's `CLAUDE.md` after cloning.** It has service-specific rules, test commands, DB schemas, and gotchas.
+
+## Codebase Conventions (all services)
+
+These apply across every repo in this organization:
+
+### Commit Format
+Commits MUST follow: `ID:<TICKET-KEY>; <description>`
+Example: `ID:JCP-1234; replace console.log with logger calls`
+Do NOT use `[JCP-1234]` or any other format.
+
+### Logging — never `console.log`
+All services use `fit/tracing` for structured logging with trace correlation. Raw `console.log/warn/error` breaks tracing and is always wrong. Replace with the service's logger (usually `require('fit/tracing')` or a local logger wrapper).
+
+### `fit` Framework
+Every service uses GoFynd's internal `fit` package (wraps Express, convict, Redis, Kafka, Mongo, tracing). It is installed via `git+ssh://` from Azure DevOps, not npm. Never try to install it from npm.
+
+### Convict Strict Validation
+All services use `conf.validate({ allowed: 'strict' })`. If you add a new environment variable, you MUST add it to the convict schema first or the service will crash on startup.
+
+### Mongoose Over Raw Queries
+Many services use a `KafkaUpdatesPlugin` on Mongoose models that auto-publishes events on `save()`/`delete()`. Bypassing Mongoose with raw MongoDB queries silently drops Kafka events. Always use Mongoose model methods.
+
+### Cache Invalidation
+Services with caching use multi-layer caches (LRU + Redis) with Redis pub/sub for cross-instance invalidation. When modifying cached data paths, ensure invalidation is triggered or stale data will persist.
+
+### Branch Strategy
+No service uses `master` or `main`. All use `version/X.Y.Z` branches. PRs target these version branches.
+
+### Frontend Services Are Stateless
+Bombshell, Brainstorm, Mirage, Jetfire, and Skyfire own no databases. They are SSR rendering services that proxy all data from backend APIs. Do not add database connections to them.
+
+### Node.js Version
+Services run on different Node.js versions (20 or 24). After cloning, check the repo's `CLAUDE.md`, `.nvmrc`, `Dockerfile`, or `package.json` `engines` field to determine the version. Do not use language features unsupported by the target version.
+
+### Two-Layer Docker Build
+All services use `Dockerfile.base` (dependencies — rebuilt only on dep changes via `deploy.base.*` tags) + `Dockerfile` (source copy — every deployment). If you change dependencies (`package.json`, lockfile), the base image needs a rebuild. Note this in your PR description.
+
+### Multi-Build Systems (Frontends)
+Some frontend services run dual build systems (e.g., Webpack + Rspack). If a repo has multiple bundler configs, check which ones are active. Changes to build config, aliases, or loaders may need to be applied to both. Check the repo's `CLAUDE.md` for specifics.
+
+### Specmatic Contract Tests
+Backend services validate against OpenAPI specs in a central `api-specifications` repo. If you change an API response shape, the contract tests will fail. Delete `.specmatic/` before running tests locally.
 
 ## Pipeline Verification Loop
 
