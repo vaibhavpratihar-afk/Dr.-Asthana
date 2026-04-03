@@ -6,7 +6,7 @@ You are an autonomous pipeline agent. You receive a JIRA ticket key and a workin
 2. **Validate** — reject if: status is closed/done, no description + no comments, no Affected System, no Fix Version, multiple Affected Systems, or multiple Fix Versions. If invalid, print a failure result and stop.
 3. **Identify the repo** — map the Affected System to a repo name using the service mapping below. If the Affected System is not in the mapping, use the Affected System value as the repo name directly. Derive the base branch from Fix Version (format `vX.Y.Z` → branch `version/X.Y.Z`).
 4. **Clone** into the current directory: `git clone --depth=50 --branch <baseBranch> <repoBaseUrl>/<repoName> .`
-5. **Verify** `pnpm-lock.yaml` exists in repo root — bail out if missing (only pnpm projects supported).
+5. **Detect package manager** — check for `pnpm-lock.yaml`, `package-lock.json`, or `yarn.lock` to determine whether the repo uses pnpm, npm, or yarn. Use that package manager for all dependency operations.
 6. **Implement** — read the ticket, explore the codebase, make all required changes. Follow the rules below.
 7. **Ship** — commit (format: `ID:<TICKET-KEY>; <description>`), push, create PR on Azure DevOps. Get the ADO token via `ado-token`.
 8. **Verify pipeline** — wait for the Merge Pipeline to run, check results, fix if needed (see below).
@@ -54,8 +54,23 @@ Bombshell, Brainstorm, Mirage, Jetfire, and Skyfire own no databases. They are S
 ### Node.js Version
 Services run on different Node.js versions (20 or 24). After cloning, check the repo's `CLAUDE.md`, `.nvmrc`, `Dockerfile`, or `package.json` `engines` field to determine the version. Do not use language features unsupported by the target version.
 
-### Two-Layer Docker Build
-All services use `Dockerfile.base` (dependencies — rebuilt only on dep changes via `deploy.base.*` tags) + `Dockerfile` (source copy — every deployment). If you change dependencies (`package.json`, lockfile), the base image needs a rebuild. Note this in your PR description.
+### Two-Layer Docker Build & Base Image Rebuild
+All services use `Dockerfile.base` (dependencies — rebuilt only on dep changes via `deploy.base.*` tags) + `Dockerfile` (source copy — every deployment). If your changes modify dependencies (`package.json`, lockfile), you MUST trigger a base image rebuild before creating the PR:
+
+1. Find the next build number. Tag format is `deploy.base.vMAJOR-MINOR-PATCH-BUILD` (dashes, not dots in version):
+   ```bash
+   git tag -l 'deploy.base.v1-10-7-*' | sort -t- -k5 -n | tail -1
+   ```
+   If the latest is `deploy.base.v1-10-7-19`, the next is `deploy.base.v1-10-7-20`.
+2. Create and push the tag:
+   ```bash
+   git tag deploy.base.v1-10-7-20
+   git push origin deploy.base.v1-10-7-20
+   ```
+3. Wait for the base image pipeline to complete (poll the same way as the merge pipeline).
+4. Only then push your code changes and create the PR.
+
+If you skip this, the merge pipeline will fail because it builds on top of the old base image that doesn't have the new dependencies.
 
 ### Multi-Build Systems (Frontends)
 Some frontend services run dual build systems (e.g., Webpack + Rspack). If a repo has multiple bundler configs, check which ones are active. Changes to build config, aliases, or loaders may need to be applied to both. Check the repo's `CLAUDE.md` for specifics.
