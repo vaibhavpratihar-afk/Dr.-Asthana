@@ -1,103 +1,69 @@
 # Auto Dev Agent
 
-Autonomous JIRA-to-PR pipeline. Reads a JIRA ticket, clones the target repo, spawns a Claude or Codex CLI agent to implement the changes and ship the PR, then notifies via Slack.
+A **Claude Code agent that is just markdown.** On a schedule, Claude reads open JIRA tickets carrying
+a trigger label and, for each, implements the change in a fresh worktree of a configured **workspace**
+and opens a pull request — then reports to Slack.
 
-## Pipeline
-
-```
-1. Fetch + validate ticket
-2. Clone repo → create feature branch
-3. Spawn agent (claude / codex) — implements changes, commits, pushes, creates PR
-4. Bundle run artifact → upload to Pixelbin
-5. Notify Slack
-```
-
-The spawned agent receives: the executor persona, ticket context (summary, description, comments, affected systems, target branch), and ship instructions (exact branch name, `az repos pr create` command with org/project/repo pre-filled). The agent explores the codebase itself, makes the changes, and ships end-to-end.
-
-## Ticket Requirements
-
-A ticket must pass all of the following before execution begins — rejected tickets get a Slack notification with the reason:
-
-| Rule | Requirement |
-|---|---|
-| Single affected system | Exactly one entry in Affected Systems |
-| Single fix version | Exactly one Fix Version / target branch |
-| pnpm project | `pnpm-lock.yaml` present in repo root after clone |
-
-Tickets failing any rule are skipped without touching the repo.
-
-## Project Structure
+The agent has **no application code**. The agent *is* [`agent.md`](agent.md), executed by Claude.
+Everything Claude can already do (search JIRA, clone/branch, edit, commit, push, open PRs, post
+Slack) it does itself by following that markdown, using the CLIs already on the machine
+(`jira-cli`, `gh`, `az`, `curl`). The only non-markdown file is [`run.sh`](run.sh), a thin bash
+launcher for the one thing the agent can't do for itself — capture its own run transcript — which it
+uploads to Pixelbin for post-mortem.
 
 ```
-src/
-  ai-provider/              # CLI adapter + spawn runtime
-    adapters/cli-json.js    # arg builder + stream parser (claude & codex)
-    provider/               # spawn-runtime, event-parser, log-writer
-  jira/                     # JIRA REST API client, parser, validator
-  notification/             # Slack DM builders
-  pipeline/
-    core/                   # checkpoint path, artifact bundler, step support
-    phases/                 # ticket, service, notify phase handlers
-  personas/                 # executor.prompt.md
-  prompt/                   # prompt builder, ticket context, ship instructions
-  service/                  # git clone + cleanup
-  utils/                    # config loader, logger
+agent.md      the agent — the whole workflow, in markdown (Claude executes it)
+run.sh        launcher: run Claude, capture transcript → Pixelbin → Slack the log link
+config.json   data only: workspace path, trigger label, model, Slack
+```
+
+No `src/`, no `package.json`, no dependencies. The workspace itself carries its own `CLAUDE.md` /
+`AGENTS.md` telling Claude how to work in it — that knowledge lives in the workspace, not here, so
+this agent is generic (cms-ai is just the configured `workspace.path`).
+
+## Flow
+
+```
+scheduler (ghanta-ghar / cron) → run.sh
+  └─ claude -p  (system prompt = agent.md), one cycle:
+       search JIRA for open tickets with the trigger label   (jira-cli)
+       for each ticket (up to maxTickets):
+         git worktree add — clean checkout of the workspace on a new feature branch
+         read the workspace's own instructions, implement the ticket
+         ship the PR  (gh / az, ambient auth)   |   or bail out cleanly
+         DM the outcome to Slack  (curl)
+         worktree remove
+  └─ tee transcript → pixelbin-upload → DM the log link to Slack
 ```
 
 ## Configuration
 
-Copy `config.example.json` → `config.json` and fill in:
+Copy `config.example.json` → `config.json` (gitignored):
 
-| Section | Required fields |
+| Field | Meaning |
 |---|---|
-| `jira` | `baseUrl`, `email`, `apiToken`, `label` |
-| `azureDevOps` | `org`, `project`, `repoBaseUrl` |
-| `services` | map of service name → `{ repo }` |
-| `agent` | `pollInterval`, `maxTicketsPerCycle`, `logDir` |
-| `aiProvider.execute` | `provider` (`claude` or `codex`), `<provider>.command`, `<provider>.model` |
-| `slack` | `botToken`, `userId` (optional) |
+| `label` | JIRA trigger label |
+| `workspace.path` | absolute path to the local workspace (data-source) git repo |
+| `workspace.baseBranch` | branch to cut feature branches from |
+| `maxTickets` | tickets to process per run (1 = one ticket per scheduled run) |
+| `claude.model` | model for the run (optional) |
+| `slack` | `botToken` + `userId` (optional — omit to print outcomes to stdout) |
 
-### Provider examples
+JIRA auth is **not** here — it belongs to the `jira` CLI (`JIRA_CONFIG_PATH`), which Claude uses.
 
-**Claude:**
-```json
-"aiProvider": {
-  "execute": {
-    "provider": "claude",
-    "claude": { "command": "claude", "model": "claude-opus-4-6" }
-  }
-}
-```
-
-**Codex:**
-```json
-"aiProvider": {
-  "execute": {
-    "provider": "codex",
-    "codex": { "command": "codex", "model": "o3" }
-  }
-}
-```
-
-## Commands
+## Run
 
 ```bash
-pnpm start                     # daemon — polls JIRA label on interval
-pnpm run single -- JCP-123     # process one ticket
-pnpm run dry-run               # fetch + display tickets, no execution
+./run.sh          # one cycle: process labeled tickets, then exit
 ```
 
-## Artifacts
+Point ghanta-ghar (or cron) at `run.sh`. There is no daemon — each invocation processes the current
+queue once and exits.
 
-Per-ticket artifacts live under `.pipeline-state/<TICKET_KEY>/`:
-- `ai-calls/<label>.prompt.md` — prompt sent to each AI call
-- `ai-calls/<label>.log` — agent output summary per call
+## Requirements (all already on this machine)
 
-Run logs live under `logs/YYYY-MM-DD/`.
-
-## Design Principles
-
-- Single agent, full autonomy — the spawned agent explores, implements, commits, and ships without pipeline scaffolding.
-- Provider-agnostic — works with `claude` or `codex` CLI; args built per-provider, output parsed from stream-json events.
-- No artificial caps — no stall timeouts, no output truncation, no tool restrictions.
-- File-backed auditability — every AI call prompt and output is persisted.
+- `claude` CLI, logged in
+- Jira tooling Claude can use (the `jira` skill / CLI / MCP), authenticated
+- `gh` / `az` authenticated as needed for shipping
+- `pixelbin-upload` on `PATH` (optional — transcript upload is skipped if absent)
+- A local clone of the workspace at `workspace.path`

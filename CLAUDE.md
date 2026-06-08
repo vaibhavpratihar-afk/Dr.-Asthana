@@ -1,76 +1,39 @@
 # CLAUDE Agent Guide
 
-This repository runs an autonomous JIRA-to-PR pipeline.
+This repository is a **markdown-only Claude agent**. The agent *is* `agent.md`, executed by Claude on
+a schedule. It turns labeled JIRA tickets into shipped PRs in a configured workspace.
 
-## Non-Negotiable Rules
+## The one rule that shapes everything
 
-1. Read before writing.
-2. Keep diffs minimal and ticket-scoped.
-3. Do not add placeholder code.
-4. Prefer deterministic, auditable behavior.
-5. Use `pnpm` (not npm/yarn).
-6. Do not use destructive git commands.
+**The agent must not contain application code.** If Claude can do something natively (JIRA via
+`jira-cli`, git/worktree via Bash, PRs via `gh`/`az`, Slack via `curl`), it belongs in `agent.md` as
+an instruction — never in a `.js` file. Code is allowed **only** for a capability Claude genuinely
+lacks (e.g. uploading to a CDN), and even then prefer an existing external CLI over adding code here.
 
-## Architecture
+When asked to add a feature, ask first: *can Claude already do this?* If yes → edit `agent.md`. If it
+needs workspace-specific knowledge → it belongs in the **workspace's** own `CLAUDE.md`, not here. Only
+a true capability gap with no existing CLI justifies new code.
 
-Single-agent execution — the spawned CLI agent (claude or codex) does everything:
+## Files
 
-1. Fetch + validate ticket (`src/jira/`)
-2. Clone repo, create feature branch (`src/service/git.js`)
-3. Spawn agent with ticket context + ship instructions (`src/prompt/index.js`)
-4. Agent implements changes, commits, pushes, creates PR on Azure DevOps
-5. Parse PR URL from agent output, notify Slack (`src/notification/`)
-
-## Module Map
-
-| Path | Responsibility |
+| File | Role |
 |---|---|
-| `src/index.js` | CLI entry point (daemon, single, dry-run) |
-| `src/pipeline/index.js` | Phase orchestrator |
-| `src/pipeline/phases/ticket.js` | Fetch + validate ticket |
-| `src/pipeline/phases/service.js` | Clone → execute step machine |
-| `src/pipeline/phases/service-steps.js` | Clone, pnpm check, execute steps |
-| `src/pipeline/phases/notify.js` | Artifact bundle + Slack notification |
-| `src/pipeline/core/bundler.js` | Artifact tar + Pixelbin upload |
-| `src/pipeline/core/checkpoint.js` | Artifact directory path helper |
-| `src/pipeline/core/support.js` | Shared pipeline utilities |
-| `src/prompt/index.js` | Builds executor prompt + ship instructions |
-| `src/prompt/ticket-context.js` | Formats ticket data for prompt |
-| `src/personas/index.js` | Loads persona `.md` files |
-| `src/personas/executor.prompt.md` | Agent task + shipping instructions |
-| `src/ai-provider/index.js` | Single `runAI()` entry point |
-| `src/ai-provider/adapters/cli-json.js` | Arg builder + stream parser (claude & codex) |
-| `src/ai-provider/provider/spawn-runtime.js` | Process spawn + stream handling |
-| `src/ai-provider/provider/event-parser.js` | JSON event → log summary |
-| `src/ai-provider/provider/log-writer.js` | Writes prompt + log files to artifact dir |
-| `src/jira/client.js` | JIRA REST API (search, fetch ticket) |
-| `src/jira/parser.js` | Parses raw JIRA response into ticket object |
-| `src/jira/validator.js` | Validates required ticket fields |
-| `src/service/git.js` | Clone repo, create branch, cleanup |
-| `src/notification/index.js` | Slack success + failure notifications |
-| `src/notification/slack.js` | Slack Web API transport |
-| `src/notification/report.js` | Slack Block Kit message builders |
-| `src/utils/config.js` | Config loader + service/repo helpers |
-| `src/utils/logger.js` | Console + file logger with step tracking |
+| `agent.md` | **The agent.** The whole workflow (find tickets → worktree → implement → ship → Slack), in markdown. Claude executes it. |
+| `run.sh` | The only non-markdown file. Bash launcher for the one gap the agent can't fill itself: capture its own transcript → `pixelbin-upload` → Slack the log link. ghanta-ghar/cron points here. |
+| `config.json` | Data only: `label`, `workspace.{path,baseBranch}`, `maxTickets`, `claude.model`, `slack`. No logic. |
 
-## Ticket Validation Rules
+There is intentionally no `src/`, no `package.json`, no dependencies.
 
-A ticket is rejected (with Slack notification) if any of these fail:
+## How a run works
 
-- **Single affected system** — `affectedSystems.length === 1`
-- **Single fix version** — `targetBranches.length === 1` and `targetBranch` exists
-- **pnpm project** — `pnpm-lock.yaml` present in repo root after clone
+`run.sh` launches `claude -p` with `agent.md` as the system prompt for one cycle. Claude searches
+JIRA for the label, and per ticket: makes a clean worktree of `workspace.path`, reads the workspace's
+own instructions, implements the ticket, ships a PR (or bails out), and DMs the outcome to Slack.
+`run.sh` then tees the transcript, uploads it to Pixelbin, and DMs the log link.
 
-## Pipeline Steps
+## Capability gaps (the only place code is allowed)
 
-1. Fetch ticket
-2. Validate ticket (rejects with Slack if rules above fail)
-3. Clone repo + create feature branch + verify pnpm-lock.yaml (rejects with Slack if missing)
-4. Execute (agent implements + commits + pushes + creates PR)
-5. Notify (artifact bundle + Slack success)
+- **Transcript capture** → `run.sh` (the agent can't tee its own stdout).
+- **Pixelbin upload** → the external `pixelbin-upload` CLI (called from `run.sh`).
 
-## Output Expectations
-
-- High signal, low noise.
-- Explicit scope and risks.
-- Reproducible artifact trail.
+Everything else is Claude doing its job from `agent.md`.
