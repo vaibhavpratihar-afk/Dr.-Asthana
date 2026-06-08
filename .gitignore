@@ -1,15 +1,8 @@
 node_modules/
-.tmp/
-# Debate workspace lives under .pipeline-state/{ticketKey}/debate/
-.pipeline-state/
-logs/
 *.log
 
 # Secrets / credentials
 config.json
-
-# Redis dump
-dump.rdb
 
 # OS files
 .DS_Store

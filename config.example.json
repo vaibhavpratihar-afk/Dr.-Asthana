@@ -4,94 +4,20 @@
     "email": "you@example.com",
     "apiToken": "YOUR_JIRA_API_TOKEN",
     "label": "your-trigger-label",
-    "labelProcessed": "your-done-label",
-    "maxComments": 100,
-    "fields": {
-      "affectedSystems": "customfield_10056",
-      "fixVersions": "fixVersions"
-    }
+    "maxComments": 50
   },
-  "azureDevOps": {
-    "org": "https://dev.azure.com/YOUR_ORG",
-    "project": "YOUR_PROJECT",
-    "repoBaseUrl": "git@ssh.dev.azure.com:v3/YOUR_ORG/YOUR_PROJECT"
+  "cmsAi": {
+    "path": "/absolute/path/to/cms-ai",
+    "baseBranch": "main"
   },
-  "services": {
-    "my-service": {
-      "repo": "my-service",
-      "component": "Component Name",
-      "componentId": "12345",
-      "lead": "Team Lead Name"
-    }
+  "claude": {
+    "command": "claude",
+    "model": "claude-sonnet-4-6",
+    "maxTurns": 200
   },
   "slack": {
-    "botToken": "xoxb-YOUR-SLACK-BOT-TOKEN",
-    "userId": "UXXXXXXXXXX"
+    "botToken": "xoxb-YOUR-SLACK-BOT-TOKEN (optional)",
+    "userId": "UXXXXXXXXXX (optional)"
   },
-  "agent": {
-    "pollInterval": 300,
-    "maxTicketsPerCycle": 1,
-    "logDir": "./logs",
-    "executionRetries": 1
-  },
-  "aiProvider": {
-    "strategy": "single",
-
-    "execute": {
-      "provider": "claude",
-      "fallbackProvider": null,
-      "claude": {
-        "model": "haiku",
-        "maxTurns": 30,
-        "timeoutMinutes": 15,
-        "allowedTools": "Read,Write,Edit,Bash,Glob,Grep"
-      },
-      "codex": {
-        "model": null,
-        "timeoutMinutes": 15
-      }
-    }
-  },
-  "council": {
-    "maxRounds": 3,
-    "failClosed": true,
-    "forceOnLastRound": false,
-    "forceBestEffortOnMaxRounds": false,
-    "proposer": {
-      "provider": "claude",
-      "model": "sonnet",
-      "maxTurns": 15,
-      "timeoutMinutes": 10,
-      "allowedTools": "Read,Glob,Grep"
-    },
-    "critics": [
-      {
-        "provider": "claude",
-        "model": "sonnet",
-        "maxTurns": 15,
-        "timeoutMinutes": 10,
-        "allowedTools": "Read,Glob,Grep"
-      },
-      {
-        "provider": "codex",
-        "model": "gpt-5.3-codex",
-        "timeoutMinutes": 10
-      }
-    ],
-    "evaluator": {
-      "provider": "claude",
-      "model": "sonnet",
-      "maxTurns": 5,
-      "timeoutMinutes": 5,
-      "allowedTools": "Read,Glob,Grep"
-    }
-  },
-  "infra": {
-    "enabled": false,
-    "scriptsDir": "/path/to/infra-scripts",
-    "stopAfterProcessing": false
-  },
-  "tests": {
-    "enabled": false
-  }
+  "maxTickets": 1
 }
