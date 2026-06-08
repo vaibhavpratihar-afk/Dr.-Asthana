@@ -1,74 +1,69 @@
 # Auto Dev Agent
 
-A thin **Claude Code wrapper** for the [cms-ai](https://github.com/vaibhavpratihar-afk/cms-ai)
-workspace. On a schedule, it finds JIRA tickets carrying a trigger label and runs Claude — in a
-fresh, throwaway worktree of cms-ai — to implement each ticket and open a pull request.
+A **Claude Code agent that is just markdown.** On a schedule, Claude reads open JIRA tickets carrying
+a trigger label and, for each, implements the change in a fresh worktree of a configured **workspace**
+and opens a pull request — then reports to Slack.
 
-Almost everything the agent used to hand-roll (process spawning, stream parsing, persona injection,
-git clone, PR creation, logging) is now native Claude Code. This wrapper only does the two things
-Claude can't bootstrap on its own: **find the labeled tickets** and **report the result**.
+The agent has **no application code**. The agent *is* [`agent.md`](agent.md), executed by Claude.
+Everything Claude can already do (search JIRA, clone/branch, edit, commit, push, open PRs, post
+Slack) it does itself by following that markdown, using the CLIs already on the machine
+(`jira-cli`, `gh`, `az`, `curl`). The only non-markdown file is [`run.sh`](run.sh), a thin bash
+launcher for the one thing the agent can't do for itself — capture its own run transcript — which it
+uploads to Pixelbin for post-mortem.
+
+```
+agent.md      the agent — the whole workflow, in markdown (Claude executes it)
+run.sh        launcher: run Claude, capture transcript → Pixelbin → Slack the log link
+config.json   data only: workspace path, trigger label, model, Slack
+```
+
+No `src/`, no `package.json`, no dependencies. The workspace itself carries its own `CLAUDE.md` /
+`AGENTS.md` telling Claude how to work in it — that knowledge lives in the workspace, not here, so
+this agent is generic (cms-ai is just the configured `workspace.path`).
 
 ## Flow
 
 ```
-scheduler (ghanta-ghar / cron)
-  → search JIRA for open tickets with the trigger label
-  → for each ticket:
-      create a fresh git worktree of cms-ai on a new feature branch
-      run `claude -p` in it  (Claude: routes KB-vs-service, implements, ships the PR)
-      parse the result (PR URL / bailout)
-      notify Slack (or stdout)
-      remove the worktree
-  → exit
-```
-
-Claude decides scope from the ticket plus cms-ai's own `CLAUDE.md` / `AGENTS.md` routing table:
-
-- **Knowledge-base task** → edit files in cms-ai (`docs/`, `personas/`, `theme/`, …) → `gh pr` to GitHub.
-- **Platform-service task** → clone the needed Azure repo per `repos.json` → change it → `az repos pr`.
-
-The agent ships using the ambient `gh` / `az` auth already on the machine — the wrapper never
-handles tokens.
-
-## Layout
-
-```
-src/
-  index.js     CLI entry: search labeled tickets → run each → notify → exit
-  config.js    load + validate config.json
-  jira.js      REST search by label, fetch ticket (ADF → text), minimal validation
-  agent.js     fresh cms-ai worktree → spawn `claude -p --output-format json` → parse result
-  notify.js    Slack DM (optional) or stdout
-executor.prompt.md   system prompt: scope routing, ship instructions, bailout, output markers
+scheduler (ghanta-ghar / cron) → run.sh
+  └─ claude -p  (system prompt = agent.md), one cycle:
+       search JIRA for open tickets with the trigger label   (jira-cli)
+       for each ticket (up to maxTickets):
+         git worktree add — clean checkout of the workspace on a new feature branch
+         read the workspace's own instructions, implement the ticket
+         ship the PR  (gh / az, ambient auth)   |   or bail out cleanly
+         DM the outcome to Slack  (curl)
+         worktree remove
+  └─ tee transcript → pixelbin-upload → DM the log link to Slack
 ```
 
 ## Configuration
 
-Copy `config.example.json` → `config.json` (gitignored) and fill in:
+Copy `config.example.json` → `config.json` (gitignored):
 
-| Section | Fields |
+| Field | Meaning |
 |---|---|
-| `jira` | `baseUrl`, `email`, `apiToken`, `label`, `maxComments` |
-| `cmsAi` | `path` (absolute path to the local cms-ai clone), `baseBranch` |
-| `claude` | `command`, `model`, `maxTurns` |
-| `slack` | `botToken`, `userId` (optional — omit to log results to stdout) |
-| `maxTickets` | how many labeled tickets to process per run |
+| `label` | JIRA trigger label |
+| `workspace.path` | absolute path to the local workspace (data-source) git repo |
+| `workspace.baseBranch` | branch to cut feature branches from |
+| `maxTickets` | tickets to process per run (1 = one ticket per scheduled run) |
+| `claude.model` | model for the run (optional) |
+| `slack` | `botToken` + `userId` (optional — omit to print outcomes to stdout) |
+
+JIRA auth is **not** here — it belongs to the `jira` CLI (`JIRA_CONFIG_PATH`), which Claude uses.
 
 ## Run
 
 ```bash
-pnpm start            # process labeled tickets once, then exit (scheduled mode)
-node src/index.js JCP-1234   # process one specific ticket
+./run.sh          # one cycle: process labeled tickets, then exit
 ```
 
-There is no daemon. Schedule `pnpm start` with ghanta-ghar (or cron); each invocation processes the
-current queue and exits.
+Point ghanta-ghar (or cron) at `run.sh`. There is no daemon — each invocation processes the current
+queue once and exits.
 
-## Requirements
+## Requirements (all already on this machine)
 
-- Node ≥ 18, `pnpm`
-- `claude` CLI, logged in, on `PATH`
-- A local clone of cms-ai at `cmsAi.path`, with `gh` (GitHub) and `az` (Azure DevOps) authenticated
-- A ticket gate (run is skipped with a notification if it fails): a ticket needs a summary and
-  either a description or comments.
-```
+- `claude` CLI, logged in
+- `jira-cli` (`~/Desktop/skills/jira/scripts/jira-cli.mjs`) configured via `JIRA_CONFIG_PATH`
+- `gh` / `az` authenticated as needed for shipping
+- `pixelbin-upload` on `PATH` (optional — transcript upload is skipped if absent)
+- A local clone of the workspace at `workspace.path`

@@ -1,23 +1,15 @@
 {
-  "jira": {
-    "baseUrl": "https://your-org.atlassian.net",
-    "email": "you@example.com",
-    "apiToken": "YOUR_JIRA_API_TOKEN",
-    "label": "your-trigger-label",
-    "maxComments": 50
-  },
-  "cmsAi": {
-    "path": "/absolute/path/to/cms-ai",
+  "label": "your-trigger-label",
+  "workspace": {
+    "path": "/absolute/path/to/your/workspace",
     "baseBranch": "main"
   },
+  "maxTickets": 1,
   "claude": {
-    "command": "claude",
-    "model": "claude-sonnet-4-6",
-    "maxTurns": 200
+    "model": "claude-sonnet-4-6"
   },
   "slack": {
     "botToken": "xoxb-YOUR-SLACK-BOT-TOKEN (optional)",
     "userId": "UXXXXXXXXXX (optional)"
-  },
-  "maxTickets": 1
+  }
 }

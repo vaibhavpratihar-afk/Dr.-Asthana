@@ -1,54 +1,39 @@
 # CLAUDE Agent Guide
 
-This repository is a **thin Claude Code wrapper**. It finds JIRA tickets carrying a trigger label
-and runs `claude -p` inside a fresh worktree of the cms-ai workspace to implement each ticket and
-open a PR. It is driven entirely by an external scheduler (ghanta-ghar / cron) — there is no daemon.
+This repository is a **markdown-only Claude agent**. The agent *is* `agent.md`, executed by Claude on
+a schedule. It turns labeled JIRA tickets into shipped PRs in a configured workspace.
 
-## Non-Negotiable Rules
+## The one rule that shapes everything
 
-1. Read before writing.
-2. Keep diffs minimal and ticket-scoped.
-3. No placeholder code.
-4. Prefer deterministic, auditable behavior.
-5. Use `pnpm` (not npm/yarn) for this repo.
-6. No destructive git commands.
-7. Stay slim. The whole point of this rewrite was to delete code that Claude Code now does
-   natively (spawn/stream parsing, persona injection, git clone, PR creation, logging). Do not
-   reintroduce that scaffolding. If a feature can be a flag to `claude` or an instruction in
-   `executor.prompt.md`, it does not belong in JS.
+**The agent must not contain application code.** If Claude can do something natively (JIRA via
+`jira-cli`, git/worktree via Bash, PRs via `gh`/`az`, Slack via `curl`), it belongs in `agent.md` as
+an instruction — never in a `.js` file. Code is allowed **only** for a capability Claude genuinely
+lacks (e.g. uploading to a CDN), and even then prefer an existing external CLI over adding code here.
 
-## Architecture
+When asked to add a feature, ask first: *can Claude already do this?* If yes → edit `agent.md`. If it
+needs workspace-specific knowledge → it belongs in the **workspace's** own `CLAUDE.md`, not here. Only
+a true capability gap with no existing CLI justifies new code.
 
-The wrapper only does what Claude can't bootstrap: find the tickets and report the result.
-Everything else (read ticket, route scope, clone service repos, implement, commit, push, open PR)
-is done by the spawned `claude -p` run using cms-ai's own instruction files and the ambient
-`gh` / `az` auth.
+## Files
 
-| Path | Responsibility |
+| File | Role |
 |---|---|
-| `src/index.js` | CLI entry — search labeled tickets, process each, notify, exit |
-| `src/config.js` | Load + validate `config.json` |
-| `src/jira.js` | REST search by label, fetch ticket (ADF → text), minimal validation |
-| `src/agent.js` | Fresh cms-ai worktree → spawn `claude -p --output-format json` → parse result → cleanup |
-| `src/notify.js` | Slack DM (optional) or stdout |
-| `executor.prompt.md` | System prompt: KB-vs-service routing, ship instructions, bailout, output markers |
+| `agent.md` | **The agent.** The whole workflow (find tickets → worktree → implement → ship → Slack), in markdown. Claude executes it. |
+| `run.sh` | The only non-markdown file. Bash launcher for the one gap the agent can't fill itself: capture its own transcript → `pixelbin-upload` → Slack the log link. ghanta-ghar/cron points here. |
+| `config.json` | Data only: `label`, `workspace.{path,baseBranch}`, `maxTickets`, `claude.model`, `slack`. No logic. |
 
-## How a ticket is processed
+There is intentionally no `src/`, no `package.json`, no dependencies.
 
-1. `jira.searchByLabel` — open tickets with the trigger label (highest priority first).
-2. `jira.getTicket` + `jira.validate` — fetch detail; skip (with a Slack note) if no summary, or no
-   description and no comments.
-3. `agent.runTicket` — `git worktree add` a clean checkout of cms-ai on a new feature branch, spawn
-   `claude -p` there with `executor.prompt.md` appended as the system prompt, parse the JSON result
-   for a `**PR URL:**` or `**BAILOUT:**` marker, then remove the worktree.
-4. `notify` — report shipped / bailout / rejected / failed.
+## How a run works
 
-## Output Markers (contract between executor.prompt.md and agent.js)
+`run.sh` launches `claude -p` with `agent.md` as the system prompt for one cycle. Claude searches
+JIRA for the label, and per ticket: makes a clean worktree of `workspace.path`, reads the workspace's
+own instructions, implements the ticket, ships a PR (or bails out), and DMs the outcome to Slack.
+`run.sh` then tees the transcript, uploads it to Pixelbin, and DMs the log link.
 
-The executor prompt must emit these; `agent.js` parses them:
+## Capability gaps (the only place code is allowed)
 
-- `**PR URL:** <url>` — success
-- `**BAILOUT:** ...` / `**SUGGESTION:** ...` — needs a human
-- `**SUMMARY:** ...` — short description (optional, surfaced in the notification)
+- **Transcript capture** → `run.sh` (the agent can't tee its own stdout).
+- **Pixelbin upload** → the external `pixelbin-upload` CLI (called from `run.sh`).
 
-If you change a marker in one file, change it in the other.
+Everything else is Claude doing its job from `agent.md`.

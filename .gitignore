@@ -1,4 +1,3 @@
-node_modules/
 *.log
 
 # Secrets / credentials
@@ -9,6 +8,3 @@ config.json
 
 # Claude local state
 .claude/
-
-# pnpm
-pnpm-debug.log*
