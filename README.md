@@ -63,7 +63,7 @@ queue once and exits.
 ## Requirements (all already on this machine)
 
 - `claude` CLI, logged in
-- `jira-cli` (`~/Desktop/skills/jira/scripts/jira-cli.mjs`) configured via `JIRA_CONFIG_PATH`
+- Jira tooling Claude can use (the `jira` skill / CLI / MCP), authenticated
 - `gh` / `az` authenticated as needed for shipping
 - `pixelbin-upload` on `PATH` (optional — transcript upload is skipped if absent)
 - A local clone of the workspace at `workspace.path`

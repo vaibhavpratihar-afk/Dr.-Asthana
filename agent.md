@@ -11,30 +11,32 @@ Read `config.json` (in this repository, your starting directory) for: `label`, `
 
 ### 1. Find work
 
-Search JIRA for open tickets with the trigger label, highest priority first, capped at `maxTickets`:
+Using your Jira tooling (the `jira` skill / CLI / MCP — whatever is available), search for open
+tickets carrying the trigger label, highest priority first, capped at `maxTickets`. JQL:
 
-```bash
-node ~/Desktop/skills/jira/scripts/jira-cli.mjs search \
-  --jql 'labels = "<label>" AND statusCategory != Done ORDER BY priority DESC' --json
+```
+labels = "<label>" AND statusCategory != Done ORDER BY priority DESC
 ```
 
 If there are none, you are done — stop.
 
 ### 2. For each ticket
 
-**a. Fetch detail:** `node ~/Desktop/skills/jira/scripts/jira-cli.mjs view <KEY> --json`
+**a. Fetch detail:** with your Jira tooling, fetch the ticket's full detail (summary, description,
+comments).
 
 **b. Gate:** skip the ticket — and send a Slack rejection (step 3) — if it has no summary, or no
 description **and** no comments. Do not touch the workspace for a rejected ticket.
 
-**c. Fresh worktree** (never work in the live workspace checkout). From `workspace.path`:
+**c. Fresh worktree** (never work in the live workspace checkout). From `workspace.path`, add a
+worktree on a new feature branch in a fresh temp directory (`WT`):
 
 ```bash
 git -C <workspace.path> fetch origin <workspace.baseBranch> --quiet
-git -C <workspace.path> worktree add -b feature/<KEY>-<short-slug> /tmp/adt-<KEY> origin/<workspace.baseBranch>
+git -C <workspace.path> worktree add -b feature/<KEY>-<short-slug> "$WT" origin/<workspace.baseBranch>
 ```
 
-**d. Implement** — work inside `/tmp/adt-<KEY>`:
+**d. Implement** — work inside `$WT`:
 - Read the workspace's own instruction files there (`CLAUDE.md` / `AGENTS.md`, and anything they
   point to). They are the source of truth for layout, conventions, and how to work in this workspace.
 - Read the ticket. Explore before writing (Glob/Grep/Read). Find **every** affected location, not
@@ -58,7 +60,7 @@ do not open a PR.
 **g. Clean up:**
 
 ```bash
-git -C <workspace.path> worktree remove --force /tmp/adt-<KEY>
+git -C <workspace.path> worktree remove --force "$WT"
 git -C <workspace.path> branch -D feature/<KEY>-<short-slug>   # local only; the pushed branch stays for the PR
 ```
 
