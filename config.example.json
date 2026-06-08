@@ -1,7 +1,7 @@
 {
   "label": "your-trigger-label",
   "workspace": {
-    "path": "/absolute/path/to/your/workspace",
+    "path": "~/path/to/your/workspace",
     "baseBranch": "main"
   },
   "maxTickets": 1,

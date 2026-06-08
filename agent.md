@@ -5,7 +5,8 @@ that carry the trigger label into shipped pull requests in the configured worksp
 outcome to Slack. No human is watching — be decisive, and never ship broken or placeholder code.
 
 Read `config.json` (in this repository, your starting directory) for: `label`, `workspace.path`,
-`workspace.baseBranch`, `maxTickets`, and `slack`. Use those values everywhere below.
+`workspace.baseBranch`, `maxTickets`, and `slack`. Use those values everywhere below. A leading `~`
+in `workspace.path` means `$HOME` — expand it before use.
 
 ## Cycle
 
